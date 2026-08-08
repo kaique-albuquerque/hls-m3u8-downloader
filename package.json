@@ -1,7 +1,7 @@
 {
   "name": "video-downloader",
   "version": "1.0.0",
-  "description": "Baixa videoaulas HLS (.m3u8) via FFmpeg — para URLs às quais você já tem acesso autorizado.",
+  "description": "Downloader de vídeos HLS (.m3u8) com suporte automático à Mídia Stream (mdstrm) via curl-impersonate. Requer apenas Node.js — o FFmpeg é instalado automaticamente.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -17,8 +17,12 @@
     "hls",
     "m3u8",
     "ffmpeg",
-    "download",
-    "video"
+    "video-downloader",
+    "curl-impersonate",
+    "mdstrm",
+    "mediastream",
+    "cli",
+    "stream"
   ],
   "license": "MIT",
   "devDependencies": {
