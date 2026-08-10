@@ -125,11 +125,16 @@ export function parseSegmentPlaylist(text) {
   const keys = new Map();
   const maps = new Map();
   let targetDuration = 0;
+  let totalDuration = 0;
   let currentKey = null;
+  let pendingExtinf = null;
 
   for (const line of lines) {
     if (line.startsWith('#EXT-X-TARGETDURATION:')) {
       targetDuration = parseInt(line.split(':')[1], 10) || 0;
+    } else if (line.startsWith('#EXTINF:')) {
+      const dur = parseFloat(line.slice('#EXTINF:'.length).split(',')[0]);
+      pendingExtinf = Number.isFinite(dur) ? dur : null;
     } else if (line.startsWith('#EXT-X-KEY:')) {
       const attrs = parseAttributes(line.slice('#EXT-X-KEY:'.length));
       const method = String(attrs.METHOD || 'NONE').toUpperCase();
@@ -145,6 +150,8 @@ export function parseSegmentPlaylist(text) {
     } else if (line && !line.startsWith('#')) {
       // Linha de URI de segmento (segue a linha #EXTINF).
       segments.push({ uri: line, key: currentKey ? { ...currentKey } : null });
+      if (pendingExtinf !== null) totalDuration += pendingExtinf;
+      pendingExtinf = null;
     }
   }
 
@@ -153,5 +160,6 @@ export function parseSegmentPlaylist(text) {
     keys: [...keys.values()],
     maps: [...maps.values()],
     targetDuration,
+    totalDuration,
   };
 }

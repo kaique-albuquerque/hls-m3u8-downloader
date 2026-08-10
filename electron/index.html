@@ -9,13 +9,16 @@
   <body>
     <div class="shell">
       <header class="topbar">
-        <div>
-          <div class="eyebrow">HLS Downloader</div>
-          <h1>Video Downloader</h1>
+        <div class="brand">
+          <div class="ascii-box">
+            <pre>==============================================
+   Video Downloader - HLS (.m3u8)
+   via FFmpeg + curl-impersonate (opcional)
+==============================================</pre>
+          </div>
+          <p class="subtitle">Interface espelhando o fluxo do CLI, com as mesmas etapas e mensagens principais.</p>
         </div>
-        <div class="actions">
-          <button id="newTabBtn" class="ghost">+ Nova aba</button>
-        </div>
+        <button id="newTabBtn" class="button button-ghost">+ Nova aba</button>
       </header>
 
       <nav id="tabBar" class="tabbar"></nav>
@@ -25,43 +28,132 @@
 
     <template id="tabTemplate">
       <section class="panel">
-        <div class="card">
-          <label>
-            URL do .m3u8
-            <input data-field="url" placeholder="Cole a URL aqui" />
-          </label>
-          <div class="grid2">
-            <label>
-              Nome do arquivo
-              <input data-field="filename" placeholder="aula-01" />
-            </label>
-            <label>
-              Pasta de saída
-              <div class="row">
-                <input data-field="outputDir" placeholder="Downloads" />
-                <button data-action="pickDir" class="ghost">Escolher</button>
+        <aside class="sidebar card">
+          <div class="section-heading">Fluxo do CLI</div>
+          <ol class="steps">
+            <li data-step="ffmpeg" class="step active">
+              <span class="step-index">1</span>
+              <div>
+                <strong>Verificando FFmpeg...</strong>
+                <small>Confere dependências antes de iniciar.</small>
               </div>
-            </label>
-          </div>
-          <div class="row gap">
-            <button data-action="analyze" class="primary">Analisar qualidade</button>
-            <button data-action="download" class="accent">Baixar</button>
-            <button data-action="cancel" class="ghost">Cancelar</button>
-          </div>
-        </div>
+            </li>
+            <li data-step="url" class="step">
+              <span class="step-index">2</span>
+              <div>
+                <strong>URL do .m3u8</strong>
+                <small>Valida a playlist e tenta analisar o conteúdo.</small>
+              </div>
+            </li>
+            <li data-step="variant" class="step">
+              <span class="step-index">3</span>
+              <div>
+                <strong>Qualidades encontradas</strong>
+                <small>Escolha manual ou melhor disponível.</small>
+              </div>
+            </li>
+            <li data-step="file" class="step">
+              <span class="step-index">4</span>
+              <div>
+                <strong>Nome do arquivo</strong>
+                <small>Saída final em `.mp4`.</small>
+              </div>
+            </li>
+            <li data-step="dir" class="step">
+              <span class="step-index">5</span>
+              <div>
+                <strong>Pasta de saída</strong>
+                <small>Usa Downloads por padrão.</small>
+              </div>
+            </li>
+            <li data-step="download" class="step">
+              <span class="step-index">6</span>
+              <div>
+                <strong>Baixando</strong>
+                <small>Fallback automático entre os modos do FFmpeg.</small>
+              </div>
+            </li>
+          </ol>
 
-        <div class="card">
-          <div class="section-title">Qualidades disponíveis</div>
-          <div data-field="qualities" class="qualities empty">Nenhuma URL analisada ainda.</div>
-        </div>
-
-        <div class="card">
-          <div class="section-title">Progresso</div>
-          <div class="progress-shell">
-            <div data-field="progressBar" class="progress-bar"></div>
+          <div class="meta-card">
+            <div class="meta-label">Modo atual</div>
+            <div data-field="modeLabel" class="meta-value">Aguardando análise</div>
           </div>
-          <div data-field="status" class="status">Pronto.</div>
-          <pre data-field="log" class="log"></pre>
+
+          <div class="meta-card">
+            <div class="meta-label">Saída</div>
+            <div data-field="resolvedOutput" class="meta-value mono">Ainda não definida</div>
+          </div>
+        </aside>
+
+        <div class="content">
+          <section class="card form-card">
+            <div class="section-heading">Entradas</div>
+            <div class="prompt-list">
+              <label class="prompt">
+                <span class="prompt-title">URL do .m3u8:</span>
+                <input data-field="url" placeholder="Cole a URL aqui" />
+              </label>
+
+              <div class="grid2">
+                <label class="prompt">
+                  <span class="prompt-title">Nome do arquivo (sem extensão):</span>
+                  <input data-field="filename" placeholder="video" />
+                </label>
+
+                <label class="prompt">
+                  <span class="prompt-title">Pasta de saída (Enter = Downloads):</span>
+                  <div class="inline-row">
+                    <input data-field="outputDir" placeholder="Downloads" />
+                    <button data-action="pickDir" class="button button-ghost" type="button">Escolher</button>
+                  </div>
+                </label>
+              </div>
+
+              <div class="action-row">
+                <button data-action="analyze" class="button button-primary" type="button">Analisar playlist</button>
+                <button data-action="download" class="button button-accent" type="button">Baixar agora</button>
+                <button data-action="cancel" class="button button-ghost" type="button">Cancelar</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card qualities-card">
+            <div class="section-heading">Qualidades encontradas</div>
+            <div class="hint-line">Mesmo comportamento do CLI: se você não escolher nada, usamos a melhor disponível.</div>
+            <div data-field="qualities" class="qualities empty">Nenhuma URL analisada ainda.</div>
+          </section>
+
+          <section class="card progress-card">
+            <div class="console-toolbar">
+              <div>
+                <div class="section-heading">Saída do processo</div>
+                <div data-field="status" class="status">Pronto.</div>
+              </div>
+              <div data-field="percent" class="percent">0%</div>
+            </div>
+
+            <div class="stats">
+              <div class="stat">
+                <span>Tempo</span>
+                <strong data-field="timeValue">--:--:--</strong>
+              </div>
+              <div class="stat">
+                <span>Tamanho</span>
+                <strong data-field="sizeValue">0 B</strong>
+              </div>
+              <div class="stat">
+                <span>Velocidade</span>
+                <strong data-field="speedValue">N/A</strong>
+              </div>
+            </div>
+
+            <div class="progress-shell">
+              <div data-field="progressBar" class="progress-bar"></div>
+            </div>
+
+            <pre data-field="log" class="log"></pre>
+          </section>
         </div>
       </section>
     </template>
