@@ -18,7 +18,13 @@
           </div>
           <p class="subtitle">Interface espelhando o fluxo do CLI, com as mesmas etapas e mensagens principais.</p>
         </div>
-        <button id="newTabBtn" class="button button-ghost">+ Nova aba</button>
+        <div class="topbar-actions">
+          <label class="theme-toggle" for="themeToggle">
+            <input id="themeToggle" type="checkbox" />
+            <span data-theme-label>Modo escuro</span>
+          </label>
+          <button id="newTabBtn" class="button button-ghost">+ Nova aba</button>
+        </div>
       </header>
 
       <nav id="tabBar" class="tabbar"></nav>
@@ -41,8 +47,8 @@
             <li data-step="url" class="step">
               <span class="step-index">2</span>
               <div>
-                <strong>URL do .m3u8</strong>
-                <small>Valida a playlist e tenta analisar o conteúdo.</small>
+                <strong>URL do vídeo ou playlist</strong>
+                <small>Valida HLS, DASH ou arquivo direto e tenta analisar o conteúdo.</small>
               </div>
             </li>
             <li data-step="variant" class="step">
@@ -91,7 +97,7 @@
             <div class="section-heading">Entradas</div>
             <div class="prompt-list">
               <label class="prompt">
-                <span class="prompt-title">URL do .m3u8:</span>
+                <span class="prompt-title">URL do vídeo/playlist:</span>
                 <input data-field="url" placeholder="Cole a URL aqui" />
               </label>
 

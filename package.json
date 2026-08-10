@@ -6,6 +6,7 @@
   "main": "electron/main.js",
   "scripts": {
     "download:curl": "node src/index.js --curl-impersonate",
+    "download:youtube": "node src/index.js --youtube",
     "electron:dev": "electron .",
     "electron:serve": "electron .",
     "test": "node test-curl-e2e.mjs",

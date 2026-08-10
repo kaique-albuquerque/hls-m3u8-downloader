@@ -13,11 +13,16 @@ const tabBar = document.getElementById('tabBar');
 const tabPanels = document.getElementById('tabPanels');
 const tabTemplate = document.getElementById('tabTemplate');
 const newTabBtn = document.getElementById('newTabBtn');
+const themeToggle = document.getElementById('themeToggle');
+const themeLabel = document.querySelector('[data-theme-label]');
 
 const tabs = new Map();
 const activeOutputs = new Map();
 let counter = 1;
 let defaultOutputDir = '';
+let activeTabId = '';
+
+initializeTheme();
 
 window.api.resolvePaths().then(({ defaultDownloads }) => {
   defaultOutputDir = defaultDownloads || '';
@@ -67,7 +72,19 @@ window.api.onDownloadProgress((payload) => {
   setActiveStep(tab, 'download');
 });
 
-window.api.onDownloadState(({ taskId, state }) => {
+window.api.onDownloadLog(({ taskId, line }) => {
+  const tab = tabs.get(taskId);
+  if (!tab || !line) return;
+  appendLog(tab, line);
+});
+
+window.api.onDownloadStatus(({ taskId, text }) => {
+  const tab = tabs.get(taskId);
+  if (!tab || !text) return;
+  setStatus(tab, text);
+});
+
+window.api.onDownloadState(({ taskId, state, label, output }) => {
   const tab = tabs.get(taskId);
   if (!tab) return;
 
@@ -77,10 +94,14 @@ window.api.onDownloadState(({ taskId, state }) => {
     setActiveStep(tab, 'download');
   }
 
-  const label = MODE_LABELS[state] || state;
-  tab.fields.modeLabel.textContent = label;
-  setStatus(tab, label);
-  appendLog(tab, label);
+  const text = label || MODE_LABELS[state] || state;
+  tab.fields.modeLabel.textContent = text;
+  setStatus(tab, text);
+  if (output) {
+    tab.outputPath = output;
+    tab.fields.resolvedOutput.textContent = output;
+  }
+  appendLog(tab, text);
 });
 
 window.api.onDownloadDone(({ taskId, result }) => {
@@ -119,8 +140,22 @@ function addTab() {
 
   const tabButton = document.createElement('button');
   tabButton.className = 'tab';
-  tabButton.textContent = label;
   tabButton.addEventListener('click', () => activateTab(id));
+
+  const title = document.createElement('span');
+  title.textContent = label;
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'tab-close';
+  closeBtn.textContent = 'x';
+  closeBtn.title = 'Excluir aba';
+  closeBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    removeTab(id);
+  });
+
+  tabButton.append(title, closeBtn);
 
   const panel = tabTemplate.content.firstElementChild.cloneNode(true);
   const fields = {
@@ -149,6 +184,7 @@ function addTab() {
     id,
     taskId: id,
     tabButton,
+    closeBtn,
     panel,
     fields,
     selectedQuality: null,
@@ -219,13 +255,13 @@ function addTab() {
     fields.modeLabel.textContent = 'Analise de playlist em andamento';
     fields.log.textContent = [
       '==============================================',
-      'Video Downloader - HLS (.m3u8)',
+      'Video Downloader - HLS / DASH / Midia direta',
       '==============================================',
       '',
       'Verificando FFmpeg...',
       'FFmpeg OK.',
       '',
-      `URL do .m3u8: ${url}`,
+      `URL do video/playlist: ${url}`,
       'Analisando playlist...',
     ].join('\n');
 
@@ -245,16 +281,33 @@ function addTab() {
         markAllPreviousAsDone(state, 'variant');
         setStatus(state, 'Qualidades encontradas. Se nada for escolhido, a melhor disponivel sera usada.');
         appendLog(state, `Qualidades encontradas: ${info.variants.length}`);
+      } else if (info.kind === 'dash') {
+        state.qualities = [];
+        state.selectedVariantUri = '';
+        state.selectedQuality = url;
+        const best = info.videoRepresentations?.[0];
+        renderQualities(
+          state,
+          best
+            ? `Manifesto DASH detectado. Melhor representacao encontrada: ${best.resolution || 'sem resolucao'}.`
+            : 'Manifesto DASH detectado. O FFmpeg resolvera as representacoes automaticamente.'
+        );
+        setActiveStep(state, 'file');
+        markAllPreviousAsDone(state, 'file');
+        setStatus(state, 'Manifesto DASH pronto para download.');
+        appendLog(state, `Representacoes DASH: ${info.videoRepresentations?.length || 0}`);
       } else {
         state.qualities = [];
         state.selectedVariantUri = '';
         state.selectedQuality = url;
         state.duration = info.totalDuration || 0;
-        renderQualities(state, 'Playlist unica detectada. O CLI seguiria direto para o download.');
+        renderQualities(state, info.kind === 'direct'
+          ? 'Arquivo direto detectado. O CLI seguira direto para o download.'
+          : 'Playlist unica detectada. O CLI seguiria direto para o download.');
         setActiveStep(state, 'file');
         markAllPreviousAsDone(state, 'file');
-        setStatus(state, 'Playlist pronta para download.');
-        appendLog(state, 'Playlist unica detectada.');
+        setStatus(state, info.kind === 'direct' ? 'Arquivo direto pronto para download.' : 'Playlist pronta para download.');
+        appendLog(state, info.kind === 'direct' ? 'Arquivo direto detectado.' : 'Playlist unica detectada.');
       }
     } catch (err) {
       setStatus(state, `Erro ao analisar: ${err.message}`);
@@ -298,7 +351,7 @@ function addTab() {
     setStatus(state, 'Iniciando download...');
     fields.log.textContent = [
       '==============================================',
-      'Video Downloader - HLS (.m3u8)',
+      'Video Downloader - HLS / DASH / Midia direta',
       'via FFmpeg + curl-impersonate (opcional)',
       '==============================================',
       '',
@@ -315,10 +368,20 @@ function addTab() {
 
     await window.api.startDownload({
       taskId: state.taskId,
-      playlistUrl: state.sourceUrl || url,
-      variantUri: state.selectedVariantUri || '',
-      output: fullOutput,
-      headers: {},
+      url: state.sourceUrl || url,
+      filename: baseName,
+      outputDir,
+      qualityChoice: state.qualities.length
+        ? String(
+            Math.max(
+              1,
+              state.qualities.findIndex((q) => q.uri === state.selectedVariantUri) + 1 || 1
+            )
+          )
+        : '',
+      overwriteAction: 'overwrite',
+      overwriteNewName: '',
+      forceCurl: false,
     });
   });
 
@@ -341,9 +404,34 @@ function addTab() {
 }
 
 function activateTab(id) {
+  activeTabId = id;
   for (const [tabId, tab] of tabs) {
     tab.tabButton.classList.toggle('active', tabId === id);
     tab.panel.classList.toggle('active', tabId === id);
+  }
+}
+
+function removeTab(id) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  if (tab.busy) {
+    setStatus(tab, 'Cancele o download antes de excluir esta aba.');
+    return;
+  }
+
+  releaseOutput(tab.outputPath, tab.taskId);
+  tab.tabButton.remove();
+  tab.panel.remove();
+  tabs.delete(id);
+
+  if (!tabs.size) {
+    addTab();
+    return;
+  }
+
+  if (activeTabId === id) {
+    const nextId = tabs.keys().next().value;
+    activateTab(nextId);
   }
 }
 
@@ -424,6 +512,7 @@ function lockTab(state, busy) {
     btn.disabled = busy;
   });
   state.fields.cancelBtn.disabled = !busy;
+  state.closeBtn.disabled = busy;
 }
 
 function timeToSeconds(value) {
@@ -513,4 +602,22 @@ function markAllPreviousAsDone(state, currentStep) {
     if (!node) return;
     node.classList.toggle('done', index < currentIndex);
   });
+}
+
+function initializeTheme() {
+  const savedTheme = localStorage.getItem('vd-theme') || 'dark';
+  applyTheme(savedTheme);
+  themeToggle.checked = savedTheme === 'light';
+  themeToggle.addEventListener('change', () => {
+    const nextTheme = themeToggle.checked ? 'light' : 'dark';
+    applyTheme(nextTheme);
+    localStorage.setItem('vd-theme', nextTheme);
+  });
+}
+
+function applyTheme(theme) {
+  document.body.dataset.theme = theme;
+  if (themeLabel) {
+    themeLabel.textContent = theme === 'light' ? 'Modo claro' : 'Modo escuro';
+  }
 }

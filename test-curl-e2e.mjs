@@ -15,13 +15,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parsePlaylistText, parseSegmentPlaylist } from './src/hls.js';
+import { parseDashManifest } from './src/dash.js';
 import { findCurlImpersonate } from './src/curlimp.js';
+import { resolveSourceAdapter } from './src/source-adapters.js';
 import {
   extractMdstrmVideoId,
   buildPlayerUrl,
   isMdstrmUrl,
   needsMdstrmRefresh,
 } from './src/mdstrm.js';
+import { detectSourceType, isYouTubeUrl } from './src/utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -65,6 +68,27 @@ media.m3u8
   ok(m.kind === 'master' && m.variants.length === 2, `parsePlaylistText: master deduplicada e ordenada (${m.variants.length})`);
   ok(m.variants[0].height === 720, `parsePlaylistText: melhor variante = 720p (${m.variants[0].height})`);
   ok(m.variants[0].codecs === 'avc1.640028,mp4a.40.2', `parsePlaylistText: codecs com vírgula preservado (${m.variants[0].codecs})`);
+
+  const dashText = `<?xml version="1.0"?>
+<MPD>
+  <Period>
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="v1" bandwidth="400000" width="640" height="360" codecs="avc1.64001e">
+        <BaseURL>video-360.mp4</BaseURL>
+      </Representation>
+      <Representation id="v2" bandwidth="900000" width="1280" height="720" codecs="avc1.640028">
+        <BaseURL>video-720.mp4</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
+  const d = parseDashManifest(dashText, 'https://cdn.x.com/a/b/manifest.mpd');
+  ok(d.kind === 'dash', `parseDashManifest: tipo dash (${d.kind})`);
+  ok(d.videoRepresentations.length === 2, `parseDashManifest: 2 representações de vídeo (${d.videoRepresentations.length})`);
+  ok(d.videoRepresentations[0].height === 720, `parseDashManifest: melhor representação = 720p (${d.videoRepresentations[0].height})`);
+  ok(isYouTubeUrl('https://www.youtube.com/watch?v=abc123') === true, 'utils: detecta URL do YouTube');
+  ok(detectSourceType('https://www.youtube.com/watch?v=abc123') === 'youtube', 'utils: tipo youtube');
+  ok(resolveSourceAdapter('https://www.youtube.com/watch?v=abc123').id === 'youtube', 'source-adapters: roteia para adaptador youtube');
 
   // ---- 0.1) unidade: mdstrm (extração de videoId + URL do player) ----
   const cdnUrl = 'https://us-b4-p-e-qg12.cdn.mdstrm.com/video/h/5e6f83ae335cdd1163e16b5b/6a03573096d73ba91827573a_6a03573096d73ba91827574b.mp4/index-v1-a1.m3u8?cP=2063000&pid=abc&sid=def&uid=ghi';
@@ -208,8 +232,110 @@ media.m3u8
   fs.rmSync(path.join(OUT_DIR, 'curl-test.mp4'), { force: true });
 }
 
+async function runDirectCase() {
+  console.log('\n================ CASO: arquivo direto MP4 ================\n');
+  fs.rmSync(E2E_DIR, { recursive: true, force: true });
+  fs.mkdirSync(E2E_DIR, { recursive: true });
+
+  const mp4Source = path.join(E2E_DIR, 'source.mp4');
+  const gen = spawnSync('ffmpeg', [
+    '-y',
+    '-f', 'lavfi', '-i', 'testsrc=duration=4:size=320x240:rate=30',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+    '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-c:a', 'aac',
+    mp4Source,
+  ], { windowsHide: true });
+  ok(gen.status === 0, `gerou MP4 direto com FFmpeg (exit ${gen.status})`);
+  if (gen.status !== 0) {
+    console.log(gen.stderr.toString().slice(-1500));
+    return;
+  }
+
+  const server = http.createServer((req, res) => {
+    const file = path.join(E2E_DIR, decodeURIComponent(req.url.split('?')[0].replace(/^\//, '')));
+    if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+      res.writeHead(200, { 'Content-Type': 'video/mp4' });
+      fs.createReadStream(file).pipe(res);
+    } else {
+      res.writeHead(404);
+      res.end('not found');
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  const stdin = `http://127.0.0.1:${port}/source.mp4\ndirect-test\n${OUT_DIR}\n`;
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'index.js')], { cwd: ROOT, windowsHide: true });
+  child.stdin.end(stdin);
+
+  let out = '';
+  child.stdout.on('data', (d) => (out += d.toString()));
+  child.stderr.on('data', (d) => (out += d.toString()));
+  const code = await new Promise((resolve) => child.on('close', resolve));
+
+  ok(code === 0, `[arquivo direto] exit code 0 (foi ${code})`);
+  const mp4 = path.join(OUT_DIR, 'direct-test.mp4');
+  const size = fs.existsSync(mp4) ? fs.statSync(mp4).size : 0;
+  ok(size > 50000, `[arquivo direto] MP4 gerado (${size} bytes)`);
+  server.close();
+  fs.rmSync(mp4, { force: true });
+}
+
+async function runDashCase() {
+  console.log('\n================ CASO: manifesto DASH (.mpd) ================\n');
+  fs.rmSync(E2E_DIR, { recursive: true, force: true });
+  fs.mkdirSync(E2E_DIR, { recursive: true });
+
+  const gen = spawnSync('ffmpeg', [
+    '-y',
+    '-f', 'lavfi', '-i', 'testsrc=duration=4:size=320x240:rate=30',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+    '-c:v', 'libx264', '-preset', 'ultrafast',
+    '-c:a', 'aac',
+    '-f', 'dash',
+    'manifest.mpd',
+  ], { cwd: E2E_DIR, windowsHide: true });
+  ok(gen.status === 0, `gerou DASH com FFmpeg (exit ${gen.status})`);
+  if (gen.status !== 0) {
+    console.log(gen.stderr.toString().slice(-1500));
+    return;
+  }
+
+  const server = http.createServer((req, res) => {
+    const file = path.join(E2E_DIR, decodeURIComponent(req.url.split('?')[0].replace(/^\//, '')));
+    if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+      res.writeHead(200, { 'Content-Type': file.endsWith('.mpd') ? 'application/dash+xml' : 'application/octet-stream' });
+      fs.createReadStream(file).pipe(res);
+    } else {
+      res.writeHead(404);
+      res.end('not found');
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  const stdin = `http://127.0.0.1:${port}/manifest.mpd\ndash-test\n${OUT_DIR}\n`;
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'index.js')], { cwd: ROOT, windowsHide: true });
+  child.stdin.end(stdin);
+
+  let out = '';
+  child.stdout.on('data', (d) => (out += d.toString()));
+  child.stderr.on('data', (d) => (out += d.toString()));
+  const code = await new Promise((resolve) => child.on('close', resolve));
+
+  ok(code === 0, `[DASH] exit code 0 (foi ${code})`);
+  const mp4 = path.join(OUT_DIR, 'dash-test.mp4');
+  const size = fs.existsSync(mp4) ? fs.statSync(mp4).size : 0;
+  ok(size > 50000, `[DASH] MP4 gerado (${size} bytes)`);
+  server.close();
+  fs.rmSync(mp4, { force: true });
+}
+
 await runCase({ label: 'MPEG-TS criptografado (AES-128)', encrypted: true, fmp4: false });
 await runCase({ label: 'fMP4 com EXT-X-MAP', encrypted: false, fmp4: true });
+await runDirectCase();
+await runDashCase();
 
 // ---- teste unitário da detecção v2.x (curl-impersonate.exe + perfis .bat) ----
 {

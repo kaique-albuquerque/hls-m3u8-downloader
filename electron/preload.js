@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   cancelDownload: (payload) => ipcRenderer.invoke('download:cancel', payload),
   pickOutputDir: () => ipcRenderer.invoke('app:pick-output-dir'),
   resolvePaths: () => ipcRenderer.invoke('app:resolve-paths'),
+  onDownloadLog: (cb) => ipcRenderer.on('download:log', (_e, data) => cb(data)),
+  onDownloadStatus: (cb) => ipcRenderer.on('download:status', (_e, data) => cb(data)),
   onDownloadProgress: (cb) => ipcRenderer.on('download:progress', (_e, data) => cb(data)),
   onDownloadState: (cb) => ipcRenderer.on('download:state', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download:done', (_e, data) => cb(data)),

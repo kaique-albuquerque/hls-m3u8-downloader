@@ -63,6 +63,37 @@ export function isValidM3u8Url(value) {
   }
 }
 
+const DIRECT_MEDIA_EXTENSIONS = new Set(['mp4', 'webm', 'mkv', 'mov', 'm4v', 'ts']);
+
+export function detectSourceType(value) {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'unknown';
+    if (isYouTubeUrl(value)) return 'youtube';
+    const pathname = u.pathname.toLowerCase();
+    if (pathname.includes('.m3u8')) return 'hls';
+    if (pathname.includes('.mpd')) return 'dash';
+    const ext = pathname.match(/\.([a-z0-9]{1,5})$/i)?.[1] || '';
+    if (DIRECT_MEDIA_EXTENSIONS.has(ext)) return 'direct';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+export function isSupportedMediaUrl(value) {
+  return detectSourceType(value) !== 'unknown';
+}
+
+export function isYouTubeUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com' || host === 'youtu.be';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Mascara valores de parâmetros sensíveis na query string,
  * mantendo o restante visível. Ex.:
