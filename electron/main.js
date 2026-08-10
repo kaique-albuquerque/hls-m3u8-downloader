@@ -12,7 +12,8 @@ import {
   isMdstrmUrl,
   needsMdstrmRefresh,
 } from '../src/mdstrm.js';
-import { resolveSourceAdapter } from '../src/source-adapters.js';
+import { resolveSourceAdapterAsync } from '../src/source-adapters.js';
+import { loadConfig } from '../src/cli/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -65,11 +66,18 @@ ipcMain.handle('app:resolve-paths', async () => {
   };
 });
 
-ipcMain.handle('playlist:analyze', async (_event, { url, headers }) => {
-  const adapter = resolveSourceAdapter(url);
+ipcMain.handle('playlist:analyze', async (_event, { url, headers, auth }) => {
+  const adapter = await resolveSourceAdapterAsync(url, headers || {});
   if (adapter.id === 'direct') return { kind: 'direct' };
   if (adapter.id === 'dash') return await adapter.analyze({ url, headers: headers || {} });
-  if (adapter.id === 'youtube') return await adapter.analyze({ url, headers: headers || {} });
+  if (adapter.id === 'youtube' || adapter.id === 'social') {
+    const config = loadConfig(PROJECT_ROOT, { log: () => {} });
+    const mergedAuth = {
+      cookiesFile: auth?.cookiesFile || config.cookiesFile || '',
+      cookiesFromBrowser: auth?.cookiesFromBrowser || config.cookiesFromBrowser || '',
+    };
+    return await adapter.analyze({ url, headers: headers || {}, auth: mergedAuth });
+  }
   if (adapter.id === 'unknown') return await adapter.analyze({ url, headers: headers || {} });
 
   let workingUrl = url;
@@ -105,6 +113,9 @@ ipcMain.handle('download:start', async (event, payload) => {
     overwriteAction = 'overwrite',
     overwriteNewName = '',
     forceCurl = false,
+    cookiesFile = '',
+    cookiesFromBrowser = '',
+    turbo = false,
   } = payload;
 
   const sender = event.sender;
@@ -126,7 +137,12 @@ ipcMain.handle('download:start', async (event, payload) => {
 
   try {
     const result = await runCliSession({
-      argv: forceCurl ? ['--curl-impersonate'] : [],
+      argv: [
+        ...(forceCurl ? ['--curl-impersonate'] : []),
+        ...(cookiesFile ? ['--cookies', cookiesFile] : []),
+        ...(cookiesFromBrowser ? ['--cookies-from-browser', cookiesFromBrowser] : []),
+        ...(turbo ? ['--turbo'] : []),
+      ],
       projectRoot: PROJECT_ROOT,
       answers,
       registerCancel(fn) {

@@ -23,6 +23,10 @@ export function printUsage(io) {
   io.log('  --curl-impersonate   Forca o modo curl-impersonate para HLS');
   io.log('  --youtube            Entra no fluxo do adaptador de YouTube');
   io.log('  --cookie             Define o header Cookie para URLs protegidas');
+  io.log('  --cookies <arquivo>  Usa cookies.txt (Netscape) p/ conteudo autenticado (yt-dlp)');
+  io.log('  --cookies-from-browser <b>  Extrai cookies do navegador: chrome, edge, firefox...');
+  io.log('  --turbo              Download paralelo por partes (mais rapido em URLs diretas)');
+  io.log('  --chunks <n>         Numero de conexoes do modo turbo (padrao: 8)');
   io.log('');
 }
 

@@ -1,6 +1,6 @@
 import { fetchPlaylist } from './hls.js';
 import { fetchDashManifest } from './dash.js';
-import { detectSourceType, isSocialMediaUrl, isYouTubeUrl } from './utils.js';
+import { detectSourceType, isSocialMediaUrl, isYouTubeUrl, probeMediaContentType, isDirectMediaContentType } from './utils.js';
 import { YOUTUBE_ADAPTER } from './adapters/youtube.js';
 import { SOCIAL_ADAPTER } from './adapters/social.js';
 
@@ -13,6 +13,19 @@ export function resolveSourceAdapter(url) {
   if (sourceType === 'dash') return DASH_ADAPTER;
   if (sourceType === 'direct') return DIRECT_ADAPTER;
   return UNKNOWN_ADAPTER;
+}
+
+/**
+ * Como resolveSourceAdapter, mas quando a URL nao tem extensao reconhecida
+ * faz um probe de content-type no servidor: se responder video/* ou audio/*,
+ * trata como midia direta (ex.: https://embed-api.clickhost.xyz/embed/stream/...).
+ */
+export async function resolveSourceAdapterAsync(url, headers = {}) {
+  const adapter = resolveSourceAdapter(url);
+  if (adapter.id !== 'unknown') return adapter;
+  const contentType = await probeMediaContentType(url, headers);
+  if (isDirectMediaContentType(contentType)) return { ...DIRECT_ADAPTER, detectedContentType: contentType };
+  return adapter;
 }
 
 const HLS_ADAPTER = {

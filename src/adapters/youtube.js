@@ -9,6 +9,6 @@ export const YOUTUBE_ADAPTER = {
   id: 'youtube',
   label: 'YouTube (yt-dlp)',
   supportsQualitySelection: true,
-  analyze: ({ url, headers }) => analyzeYtDlpUrl(url, headers),
+  analyze: ({ url, headers, auth }) => analyzeYtDlpUrl(url, headers, auth),
   prepareDownload: (params) => prepareYtDlpDownload(params),
 };

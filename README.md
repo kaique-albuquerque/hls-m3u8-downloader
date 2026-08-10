@@ -37,7 +37,7 @@ npm install
 
 > O programa em si **não usa dependências de runtime** — dá para rodar direto com `node src/index.js` sem `npm install`. O `npm install` instala apenas o **ntl** (menu opcional de scripts) como dependência de desenvolvimento. Exceção: para downloads do **YouTube** e de **redes sociais**, o `npm install` também baixa o binário standalone do **yt-dlp** (pacote `youtube-dl-exec`) na primeira instalação.
 
-> **Redes sociais:** além de YouTube, o adaptador social (motor yt-dlp) cobre **Facebook, Instagram, TikTok, X/Twitter, Reddit, Twitch, Vimeo, Dailymotion, LinkedIn, Bilibili, VK** e mais de 1.800 sites suportados pelo yt-dlp. Basta colar a URL do post/vídeo — o programa detecta a plataforma automaticamente e oferece as qualidades disponíveis. Conteúdo privado/login exige cookies (ainda não automatizado) e conteúdo com DRM não é suportado.
+> **Redes sociais:** além de YouTube, o adaptador social (motor yt-dlp) cobre **Facebook, Instagram, TikTok, X/Twitter, Reddit, Twitch, Vimeo, Dailymotion, LinkedIn, Bilibili, VK** e mais de 1.800 sites suportados pelo yt-dlp. Basta colar a URL do post/vídeo — o programa detecta a plataforma automaticamente e oferece as qualidades disponíveis. Conteúdo privado/login funciona com cookies (veja a seção [Conteúdo privado / autenticado](#-conteúdo-privado--autenticado-login)) e conteúdo com DRM não é suportado.
 
 ---
 
@@ -101,9 +101,61 @@ node src/index.js --referer "https://exemplo.com/" --origin "https://exemplo.com
 - `--origin <URL>` — envia o header `Origin`
 - `--user-agent "<UA>"` — envia o header `User-Agent`
 - `--curl-impersonate` / `--ci` — força o modo curl-impersonate
+- `--cookies <arquivo>` — usa um `cookies.txt` (formato Netscape) para conteúdo autenticado (YouTube privado, redes sociais com login)
+- `--cookies-from-browser <navegador>` — extrai cookies automaticamente do navegador (`chrome`, `edge`, `firefox`, `brave`, `opera`, `vivaldi`, `chromium`...)
+- `--turbo` — download paralelo por partes (HTTP Range) em URLs diretas (YouTube/redes sociais/arquivos). Mais rápido: várias conexões ao mesmo tempo
+- `--chunks <n>` — número de conexões do modo turbo (padrão: 8)
 - `--help` — mostra a ajuda
 
 Os mesmos headers podem ser definidos em um arquivo `config.json` na pasta do projeto (veja `config.example.json`). Os valores informados na linha de comando têm prioridade sobre o arquivo.
+
+---
+
+### 🔐 Conteúdo privado / autenticado (login)
+
+Sim, dá para baixar vídeos **privados** (ex.: "não listado"/privado no YouTube, post restrito no Facebook/Instagram) **desde que você tenha acesso autenticado** — o programa usa os cookies da sua sessão:
+
+1. **Exporte os cookies** do navegador enquanto estiver logado no site:
+   - Instale a extensão **"Get cookies.txt LOCALLY"** (Chrome/Edge/Firefox)
+   - Abra a página do vídeo, clique na extensão e exporte o `cookies.txt`
+2. **Use o arquivo** de uma destas formas:
+
+   ```powershell
+   # Linha de comando (o arquivo deve estar na pasta do projeto)
+   node src/index.js --cookies cookies.txt
+
+   # Ou no config.json (aplicado a todas as execuções)
+   # { "cookiesFile": "cookies.txt" }
+   ```
+
+3. **Ou extraia direto do navegador** (sem exportar nada):
+
+   ```powershell
+   node src/index.js --cookies-from-browser chrome
+   ```
+
+O programa então analisa e baixa usando a sua sessão. Se o conteúdo exigir login e não houver cookies, ele avisa com instruções.
+
+> ⚠️ **Limitações:** (1) conteúdo protegido por **DRM** (Widevine/PlayReady, comum em serviços de streaming) continua não suportado; (2) contas com **verificação em duas etapas (2FA)** às vezes exigem extração do navegador em vez de cookies.txt; (3) use apenas conteúdo ao qual você tem direito de acesso.
+
+---
+
+### ⚡ Modo turbo (download mais rápido)
+
+Por padrão o download usa **1 conexão** (FFmpeg) — o limite de velocidade fica no servidor por conexão. O **turbo** divide o arquivo em partes e baixa **várias conexões em paralelo** (estilo IDM/aria2), contornando esse limite:
+
+```powershell
+node src/index.js --turbo                 # 8 conexões paralelas (padrão)
+node src/index.js --turbo --chunks 16     # 16 conexões
+```
+
+Funciona em **URLs diretas**: YouTube (progressivo e adaptativo — vídeo+áudio baixam **ao mesmo tempo**), redes sociais e arquivos `.mp4`/`.webm`. Não se aplica a HLS (`.m3u8`) nem DASH (`.mpd`).
+
+- Se o servidor **não suportar** download por partes (sem `Accept-Ranges`), o turbo detecta e **volta automaticamente** ao fluxo normal — sem erro.
+- Também pode ser ligado por padrão no `config.json`: `{ "turbo": true, "turboChunks": 8 }`.
+- No **Electron**, é uma caixa "⚡ Turbo" em cada aba.
+
+> 💡 Ganho típico: **2–10x** em conexões rápidas (o teto vira o seu link, não o throttling por conexão do servidor).
 
 ---
 

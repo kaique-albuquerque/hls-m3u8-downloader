@@ -7,12 +7,20 @@ export function loadConfig(projectRoot, io) {
   try {
     if (fs.existsSync(configPath)) {
       const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return { headers: raw.headers || {} };
+      // Caminhos relativos de cookies.txt sao resolvidos a partir da raiz do projeto.
+      const cookiesFile = raw.cookiesFile ? path.resolve(projectRoot, raw.cookiesFile) : '';
+      return {
+        headers: raw.headers || {},
+        cookiesFile,
+        cookiesFromBrowser: raw.cookiesFromBrowser || '',
+        turbo: raw.turbo === true,
+        turboChunks: Number(raw.turboChunks) > 0 ? Number(raw.turboChunks) : 8,
+      };
     }
   } catch (err) {
     io.log(`[AVISO] config.json invalido: ${err.message}`);
   }
-  return { headers: {} };
+  return { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8 };
 }
 
 export function parseCliHeaders(argv) {
@@ -29,6 +37,20 @@ export function parseCliHeaders(argv) {
     if (key && argv[i + 1] !== undefined) headers[key] = argv[i + 1];
   }
   return headers;
+}
+
+/**
+ * Flags de autenticacao do yt-dlp:
+ *   --cookies <arquivo>           cookies.txt (formato Netscape exportado do navegador)
+ *   --cookies-from-browser <b>    extrai cookies do navegador (chrome, edge, firefox, brave...)
+ */
+export function parseCliAuth(argv) {
+  const auth = { cookiesFile: '', cookiesFromBrowser: '' };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--cookies' && argv[i + 1] !== undefined) auth.cookiesFile = argv[i + 1];
+    if (argv[i] === '--cookies-from-browser' && argv[i + 1] !== undefined) auth.cookiesFromBrowser = argv[i + 1];
+  }
+  return auth;
 }
 
 export function isGoogleVideoPlaybackUrl(url) {

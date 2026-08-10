@@ -17,6 +17,32 @@ export const YTDLP_FORMAT_UNAVAILABLE = 'YTDLP_FORMAT_UNAVAILABLE';
 export const ADAPTIVE_URI_PREFIX = 'ytdlp-format:';
 
 /**
+ * Padroes de erro do yt-dlp que indicam conteudo autenticado/restrito.
+ * Usados para oferecer a dica de cookies quando a analise falha.
+ */
+const LOGIN_REQUIRED_HINTS = [
+  'sign in',
+  'signin',
+  'log in',
+  'login',
+  'private',
+  'requires authentication',
+  'authentication required',
+  'you must be logged in',
+  'members only',
+  'this video is only available',
+  'requested format is not available',
+  '403 forbidden',
+  'forbidden',
+];
+
+/** Detecta se o stderr do yt-dlp indica conteudo autenticado/restrito. */
+export function isLoginRequiredError(stderr) {
+  const text = String(stderr || '').toLowerCase();
+  return LOGIN_REQUIRED_HINTS.some((hint) => text.includes(hint));
+}
+
+/**
  * Opcoes padrao do yt-dlp para obter apenas o JSON de formatos.
  * - preferFreeFormats: prefere formatos com codecs abertos (vp9/opus) quando
  *   disponiveis, mantendo tambem os demais formatos no JSON.
@@ -91,20 +117,29 @@ function mapYtDlpFormat(format) {
  * Os variants de video adaptativo usam a URI "ytdlp-format:<formatId>" e os
  * progressivos usam a URL direta (mesmo contrato de src/youtube.js).
  */
-export async function analyzeYtDlpUrl(url, headers = {}) {
+export async function analyzeYtDlpUrl(url, headers = {}, auth = {}) {
   let info;
   try {
     const userAgent = headers?.['user-agent'] || headers?.['User-Agent'];
+    const cookiesFile = auth?.cookiesFile || '';
+    const cookiesFromBrowser = auth?.cookiesFromBrowser || '';
     info = await youtubeDl(url, {
       ...buildBaseOptions(),
       ...(userAgent ? { userAgent } : {}),
+      ...(cookiesFile ? { cookies: cookiesFile } : {}),
+      ...(cookiesFromBrowser ? { cookiesFromBrowser } : {}),
     });
   } catch (err) {
+    const stderr = String(err.stderr || err.message || '');
+    const needsAuth = isLoginRequiredError(stderr);
     const cause = new Error(
-      `Nao foi possivel analisar o video com o yt-dlp: ${err.message || String(err)}`
+      needsAuth
+        ? `Conteudo autenticado/restrito: o yt-dlp nao conseguiu acessar sem login. Exporte os cookies do navegador (extensao "Get cookies.txt LOCALLY") e use --cookies <arquivo>, ou use --cookies-from-browser chrome/edge/firefox. Detalhes: ${err.message || String(err)}`
+        : `Nao foi possivel analisar o video com o yt-dlp: ${err.message || String(err)}`
     );
     cause.code = 'YTDLP_ANALYZE_FAILED';
     cause.stderr = err.stderr || '';
+    cause.needsAuth = needsAuth;
     throw cause;
   }
 
@@ -181,7 +216,7 @@ export async function analyzeYtDlpUrl(url, headers = {}) {
  * - "ytdlp-format:<formatId>" -> mux (video + melhor audio) via FFmpeg
  * - URL direta (progressivo)    -> download unico
  */
-export async function prepareYtDlpDownload({ analysis, selectedUrl, headers = {} }) {
+export async function prepareYtDlpDownload({ analysis, selectedUrl, headers = {}, auth = {} }) {
   if (selectedUrl?.startsWith(ADAPTIVE_URI_PREFIX)) {
     const formatId = selectedUrl.slice(ADAPTIVE_URI_PREFIX.length);
     const video = analysis?.adaptiveVideoFormats?.find((format) => format.formatId === formatId) || null;

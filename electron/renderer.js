@@ -176,6 +176,7 @@ function addTab() {
     downloadBtn: panel.querySelector('[data-action="download"]'),
     cancelBtn: panel.querySelector('[data-action="cancel"]'),
     pickDirBtn: panel.querySelector('[data-action="pickDir"]'),
+    turbo: panel.querySelector('[data-field="turbo"]'),
   };
 
   fields.outputDir.value = defaultOutputDir;
@@ -255,7 +256,7 @@ function addTab() {
     fields.modeLabel.textContent = 'Analise de playlist em andamento';
     fields.log.textContent = [
       '==============================================',
-      'Video Downloader - HLS / DASH / Midia direta',
+      'Video Downloader - HLS / DASH / YouTube / Redes sociais',
       '==============================================',
       '',
       'Verificando FFmpeg...',
@@ -270,7 +271,7 @@ function addTab() {
       state.sourceUrl = url;
       state.analysisBaseUrl = info.baseUrl || url;
 
-      if (info.kind === 'master' || info.kind === 'youtube') {
+      if (info.kind === 'master' || info.kind === 'youtube' || info.kind === 'ytdlp') {
         state.qualities = info.variants;
         state.selectedVariantUri = info.variants[0]?.uri || '';
         state.selectedQuality = state.selectedVariantUri
@@ -279,15 +280,12 @@ function addTab() {
         renderQualities(state);
         setActiveStep(state, 'variant');
         markAllPreviousAsDone(state, 'variant');
+        const title = info.title ? ` para "${info.title}"` : '';
         setStatus(
           state,
-          info.kind === 'youtube'
-            ? `Formatos progressivos do YouTube encontrados para "${info.title}".`
-            : 'Qualidades encontradas. Se nada for escolhido, a melhor disponivel sera usada.'
+          `Formatos encontrados${title}. Se nada for escolhido, a melhor disponivel sera usada.`
         );
-        appendLog(state, info.kind === 'youtube'
-          ? `Formatos progressivos do YouTube: ${info.variants.length}`
-          : `Qualidades encontradas: ${info.variants.length}`);
+        appendLog(state, `Formatos encontrados: ${info.variants.length}`);
       } else if (info.kind === 'dash') {
         state.qualities = [];
         state.selectedVariantUri = '';
@@ -347,6 +345,8 @@ function addTab() {
       state.selectedQuality = new URL(state.selectedVariantUri, state.analysisBaseUrl || url).toString();
     }
 
+    const chosenQuality = state.qualities.find((q) => q.uri === state.selectedVariantUri);
+
     state.outputPath = fullOutput;
     activeOutputs.set(fullOutput, state.taskId);
     refreshResolvedOutput(state);
@@ -358,7 +358,7 @@ function addTab() {
     setStatus(state, 'Iniciando download...');
     fields.log.textContent = [
       '==============================================',
-      'Video Downloader - HLS / DASH / Midia direta',
+      'Video Downloader - HLS / DASH / YouTube / Redes sociais',
       'via FFmpeg + curl-impersonate (opcional)',
       '==============================================',
       '',
@@ -367,7 +367,7 @@ function addTab() {
       '',
       `URL reconhecida: ${url}`,
       state.qualities.length
-        ? `Variant escolhida: ${state.selectedQuality || 'melhor disponivel'}`
+        ? `Formato escolhido: ${chosenQuality?.resolution || state.selectedQuality || 'melhor disponivel'}`
         : 'Playlist unica detectada.',
       `Salvando em: ${fullOutput}`,
       'Iniciando fluxo padrao do FFmpeg...',
@@ -389,6 +389,7 @@ function addTab() {
       overwriteAction: 'overwrite',
       overwriteNewName: '',
       forceCurl: false,
+      turbo: fields.turbo?.checked === true,
     });
   });
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { checkFfmpeg } from './ffmpeg.js';
 import { fetchPlaylist } from './hls.js';
-import { resolveSourceAdapter } from './source-adapters.js';
+import { resolveSourceAdapter, resolveSourceAdapterAsync } from './source-adapters.js';
 import {
   normalizeUrl,
   maskUrl,
@@ -13,6 +13,7 @@ import {
   formatKbps,
   normalizeHeaders,
   getClipboardText,
+  detectSourceType,
 } from './utils.js';
 import { MODE_LABELS, createAnswerSource, createContext, onInterrupt, sourceLooksLikeYouTubeWatch } from './cli/context.js';
 import {
@@ -24,8 +25,9 @@ import {
   describeSourceType,
   resolveExistingFile,
 } from './cli/ui.js';
-import { loadConfig, parseCliHeaders, isGoogleVideoPlaybackUrl, collectDevtoolsHeaders } from './cli/config.js';
+import { loadConfig, parseCliHeaders, parseCliAuth, isGoogleVideoPlaybackUrl, collectDevtoolsHeaders } from './cli/config.js';
 import { runDownloadFlow, runMuxedDownloadFlow } from './cli/download.js';
+import { runTurboDownloadFlow, runTurboMuxedDownloadFlow, DEFAULT_TURBO_CHUNKS } from './cli/turbo.js';
 import { runCurlDownloadFlow } from './cli/curl-flow.js';
 
 /** Tipos de fonte que usam o fluxo padrao "analyze -> chooseVariant -> prepareDownload". */
@@ -64,6 +66,23 @@ export async function runCliSession({
   const config = loadConfig(projectRoot, safeIo);
   let headers = normalizeHeaders({ ...config.headers, ...parseCliHeaders(argv) });
 
+  // Autenticacao do yt-dlp: flag de CLI tem prioridade sobre config.json.
+  const cliAuth = parseCliAuth(argv);
+  const auth = {
+    cookiesFile: cliAuth.cookiesFile || config.cookiesFile || '',
+    cookiesFromBrowser: cliAuth.cookiesFromBrowser || config.cookiesFromBrowser || '',
+  };
+  if (auth.cookiesFile) safeIo.log(`[auth] Usando cookies do arquivo: ${auth.cookiesFile}`);
+  if (auth.cookiesFromBrowser) safeIo.log(`[auth] Usando cookies do navegador: ${auth.cookiesFromBrowser}`);
+
+  // Modo turbo (download paralelo por partes): flag de CLI tem prioridade sobre config.json.
+  const turboEnabled = argv.includes('--turbo') ? true : config.turbo === true;
+  let turboChunks = DEFAULT_TURBO_CHUNKS;
+  const chunksIdx = argv.indexOf('--chunks');
+  if (chunksIdx !== -1 && Number(argv[chunksIdx + 1]) > 0) turboChunks = Number(argv[chunksIdx + 1]);
+  else if (config.turboChunks > 0) turboChunks = config.turboChunks;
+  if (turboEnabled) safeIo.log(`[turbo] Download paralelo ativado (${turboChunks} conexoes).`);
+
   safeIo.onState?.({ state: 'ffmpeg-check' });
   safeIo.log('\nVerificando FFmpeg...');
   if (!(await checkFfmpeg())) {
@@ -88,15 +107,18 @@ export async function runCliSession({
   }
   const adapter = forceYouTube && sourceLooksLikeYouTubeWatch(url)
     ? resolveSourceAdapter('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
-    : resolveSourceAdapter(url);
+    : await resolveSourceAdapterAsync(url, headers);
   const sourceType = adapter.id;
   if (sourceType === 'unknown') {
     safeIo.error('\n[ERRO] A URL nao parece ser uma fonte suportada.');
-    safeIo.error('Use uma URL HTTP/HTTPS contendo ".m3u8", ".mpd", um arquivo direto como ".mp4" / ".webm", ou implemente um adaptador especifico.');
+    safeIo.error('Use uma URL HTTP/HTTPS contendo ".m3u8", ".mpd", um arquivo direto como ".mp4" / ".webm", ou uma URL sem extensao cujo servidor responda como video/audio (detectado automaticamente).');
     return { code: 1, ok: false };
   }
   safeIo.log(`URL reconhecida: ${maskUrl(url)}`);
   safeIo.log(`Tipo detectado: ${describeSourceType(sourceType)}`);
+  if (sourceType === 'direct' && detectSourceType(url) === 'unknown' && adapter.detectedContentType) {
+    safeIo.log(`[probe] URL sem extensao, mas o servidor respondeu "${adapter.detectedContentType}" — tratando como midia direta.`);
+  }
 
   if (sourceType === 'direct' && isGoogleVideoPlaybackUrl(url)) {
     headers = await collectDevtoolsHeaders(answerFn, safeIo, headers);
@@ -108,7 +130,7 @@ export async function runCliSession({
     safeIo.onState?.({ state: 'analyzing' });
     safeIo.log(`\nAnalisando ${describeSourceType(sourceType)}...`);
     try {
-      info = await adapter.analyze({ url, headers });
+      info = await adapter.analyze({ url, headers, auth });
       safeIo.log(`Video detectado: ${info.title}`);
       if (info.progressiveFormats?.length) {
         safeIo.log(`Formatos progressivos disponiveis: ${info.progressiveFormats.length}`);
@@ -125,6 +147,12 @@ export async function runCliSession({
       safeIo.log(`Formato escolhido: ${chosen}`);
     } catch (err) {
       safeIo.error(`\n[ERRO] ${err.message}`);
+      if (err.needsAuth) {
+        safeIo.error('\nDica: o conteudo parece exigir login.');
+        safeIo.error('  1. Instale a extensao "Get cookies.txt LOCALLY" no Chrome/Edge/Firefox e exporte os cookies do site.');
+        safeIo.error('  2. Rode:  node src/index.js --cookies cookies.txt');
+        safeIo.error('  3. Ou extraia direto do navegador:  node src/index.js --cookies-from-browser chrome');
+      }
       return { code: 1, ok: false, error: err.code || sourceType };
     }
   } else if (sourceType === 'hls' && !useCurlFlag) {
@@ -210,6 +238,7 @@ export async function runCliSession({
       output,
       analysis: info,
       selectedUrl: targetUrl,
+      auth,
     });
     targetUrl = preparedPlan?.downloadUrl || targetUrl;
   } catch (err) {
@@ -218,8 +247,11 @@ export async function runCliSession({
   }
 
   let result;
+  // Turbo so faz sentido em URLs diretas (YouTube/redes sociais/direct), nunca em HLS/DASH/curl.
+  const turboEligible = !useCurlFlag && (ADAPTER_BASED_SOURCES.has(sourceType) || sourceType === 'direct');
+
   if (preparedPlan?.strategy === 'mux') {
-    result = await runMuxedDownloadFlow(ctx, {
+    const muxOpts = {
       videoUrl: preparedPlan.videoUrl,
       audioUrl: preparedPlan.audioUrl,
       output,
@@ -228,7 +260,35 @@ export async function runCliSession({
       audioBytes: preparedPlan.audioBytes,
       totalBytes: preparedPlan.totalBytes,
       durationMs: preparedPlan.durationMs,
+    };
+    if (turboEnabled) {
+      result = await runTurboMuxedDownloadFlow(ctx, muxOpts);
+      if (!result.ok && result.error === 'no-range') {
+        safeIo.log('\n[AVISO] Turbo indisponivel; voltando ao fluxo padrao...');
+        result = await runMuxedDownloadFlow(ctx, muxOpts);
+      }
+    } else {
+      result = await runMuxedDownloadFlow(ctx, muxOpts);
+    }
+  } else if (turboEnabled && turboEligible) {
+    result = await runTurboDownloadFlow(ctx, {
+      url: targetUrl,
+      output,
+      headers,
+      totalBytes: preparedPlan?.totalBytes,
+      durationMs: preparedPlan?.durationMs,
+      chunkCount: turboChunks,
     });
+    if (!result.ok && result.error === 'no-range') {
+      safeIo.log('[AVISO] Turbo indisponivel; voltando ao fluxo padrao...');
+      result = await runDownloadFlow(ctx, {
+        url: targetUrl,
+        output,
+        headers,
+        totalBytes: preparedPlan?.totalBytes,
+        durationMs: preparedPlan?.durationMs,
+      });
+    }
   } else {
     result = useCurlFlag && sourceType === 'hls'
       ? await runCurlDownloadFlow(ctx, { ask: answerFn, url: targetUrl, output, headers })

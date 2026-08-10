@@ -35,6 +35,11 @@ export function onInterrupt(ctx) {
     ctx.currentFfmpeg.stop();
     return;
   }
+  if (ctx.turboAbort) {
+    ctx.io.log('\n\nCancelando o download paralelo (turbo)... (aguarde)');
+    ctx.turboAbort.abort();
+    return;
+  }
   if (ctx.curlimpActive) {
     ctx.io.log('\n\nCancelando o download dos segmentos... (aguarde)');
     killAllCurl();

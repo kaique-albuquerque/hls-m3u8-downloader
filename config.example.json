@@ -3,5 +3,11 @@
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Referer": "https://exemplo.com/",
     "Origin": "https://exemplo.com"
-  }
+  },
+  "_comentario_cookies": "Conteudo autenticado (YouTube privado, Facebook/Instagram com login, etc.). Preencha cookiesFile com o caminho de um cookies.txt exportado do navegador (formato Netscape, extensao 'Get cookies.txt LOCALLY'), OU cookiesFromBrowser com chrome/edge/firefox/brave para extrair automaticamente. Ambos sao opcionais.",
+  "cookiesFile": "",
+  "cookiesFromBrowser": "",
+  "_comentario_turbo": "Modo turbo: download paralelo por partes (HTTP Range) em URLs diretas (YouTube/sociais/arquivos). turbo=true liga por padrao; turboChunks define o numero de conexoes (padrao 8). Opcional.",
+  "turbo": false,
+  "turboChunks": 8
 }

@@ -12,8 +12,8 @@
         <div class="brand">
           <div class="ascii-box">
             <pre>==============================================
-   Video Downloader - HLS (.m3u8)
-   via FFmpeg + curl-impersonate (opcional)
+   Video Downloader - HLS / DASH / YouTube /
+   Redes sociais via FFmpeg + curl-impersonate
 ==============================================</pre>
           </div>
           <p class="subtitle">Interface espelhando o fluxo do CLI, com as mesmas etapas e mensagens principais.</p>
@@ -48,7 +48,7 @@
               <span class="step-index">2</span>
               <div>
                 <strong>URL do vídeo ou playlist</strong>
-                <small>Valida HLS, DASH ou arquivo direto e tenta analisar o conteúdo.</small>
+                <small>Valida HLS, DASH, YouTube ou redes sociais e tenta analisar o conteúdo.</small>
               </div>
             </li>
             <li data-step="variant" class="step">
@@ -115,6 +115,11 @@
                   </div>
                 </label>
               </div>
+
+              <label class="toggle">
+                <input data-field="turbo" type="checkbox" />
+                <span>⚡ Turbo — download paralelo por partes (mais rápido em YouTube/sociais/arquivos diretos)</span>
+              </label>
 
               <div class="action-row">
                 <button data-action="analyze" class="button button-primary" type="button">Analisar playlist</button>
