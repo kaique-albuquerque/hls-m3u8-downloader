@@ -1,10 +1,12 @@
 import { fetchPlaylist } from './hls.js';
 import { fetchDashManifest } from './dash.js';
-import { detectSourceType, isYouTubeUrl } from './utils.js';
-import { analyzeYouTubeUrl, prepareYouTubeDownload } from './youtube.js';
+import { detectSourceType, isSocialMediaUrl, isYouTubeUrl } from './utils.js';
+import { YOUTUBE_ADAPTER } from './adapters/youtube.js';
+import { SOCIAL_ADAPTER } from './adapters/social.js';
 
 export function resolveSourceAdapter(url) {
   if (isYouTubeUrl(url)) return YOUTUBE_ADAPTER;
+  if (isSocialMediaUrl(url)) return SOCIAL_ADAPTER;
 
   const sourceType = detectSourceType(url);
   if (sourceType === 'hls') return HLS_ADAPTER;
@@ -46,18 +48,6 @@ const DIRECT_ADAPTER = {
   },
   async prepareDownload({ url }) {
     return { downloadUrl: url };
-  },
-};
-
-const YOUTUBE_ADAPTER = {
-  id: 'youtube',
-  label: 'YouTube',
-  supportsQualitySelection: true,
-  async analyze({ url, headers }) {
-    return analyzeYouTubeUrl(url, headers);
-  },
-  async prepareDownload({ analysis, selectedUrl }) {
-    return prepareYouTubeDownload({ analysis, selectedUrl });
   },
 };
 

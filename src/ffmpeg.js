@@ -133,3 +133,74 @@ export function startDownload({ url, output, headers = {}, modeIndex = 0, onProg
 
   return { promise, stop, mode };
 }
+
+export function startMuxDownload({ videoInput, audioInput, output, onProgress }) {
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-nostats',
+    '-y',
+    '-i', videoInput,
+    '-i', audioInput,
+    '-progress', 'pipe:1',
+    '-map', '0:v:0',
+    '-map', '1:a:0',
+    '-c:v', 'copy',
+    '-c:a', 'copy',
+    '-movflags', '+faststart',
+    output,
+  ];
+
+  let child;
+  try {
+    child = spawn(getFfmpegCommand(), args, { windowsHide: true });
+  } catch (err) {
+    return {
+      promise: Promise.resolve({ ok: false, code: -1, error: err, stderr: '', interrupted: false }),
+      stop: () => {},
+    };
+  }
+
+  let stderr = '';
+  let buf = '';
+  let interrupted = false;
+
+  child.stdout.on('data', (chunk) => {
+    buf += chunk.toString();
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      const eq = line.indexOf('=');
+      if (eq > 0 && onProgress) onProgress({ key: line.slice(0, eq), value: line.slice(eq + 1) });
+    }
+  });
+
+  child.stderr.on('data', (d) => {
+    stderr = (stderr + d.toString()).slice(-60000);
+  });
+
+  const stop = () => {
+    interrupted = true;
+    try {
+      if (child.stdin && child.stdin.writable) child.stdin.write('q');
+    } catch {
+      /* ignora */
+    }
+    const killer = setTimeout(() => {
+      try {
+        if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      } catch {
+        /* ignora */
+      }
+    }, 6000);
+    killer.unref();
+  };
+
+  const promise = new Promise((resolve) => {
+    child.on('error', (err) => resolve({ ok: false, code: -1, error: err, stderr, interrupted }));
+    child.on('close', (code) => resolve({ ok: code === 0 && !interrupted, code, stderr, interrupted }));
+  });
+
+  return { promise, stop };
+}

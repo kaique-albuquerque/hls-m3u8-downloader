@@ -18,6 +18,8 @@ import { parsePlaylistText, parseSegmentPlaylist } from './src/hls.js';
 import { parseDashManifest } from './src/dash.js';
 import { findCurlImpersonate } from './src/curlimp.js';
 import { resolveSourceAdapter } from './src/source-adapters.js';
+import { extractInitialPlayerResponse, parseYouTubePlayerResponse, prepareYouTubeDownload } from './src/legacy/youtube.js';
+import { applyNTransform, applySignatureCipher, decipherYouTubeSignature, extractPlayerJsUrl, transformYouTubeNParam } from './src/legacy/youtube-signature.js';
 import {
   extractMdstrmVideoId,
   buildPlayerUrl,
@@ -31,6 +33,21 @@ const ROOT = __dirname;
 const E2E_DIR = path.join(os.tmpdir(), 'vd-e2e');
 const OUT_DIR = path.join(os.tmpdir(), 'vd-e2e-out');
 const TOOLS_DIR = path.join(ROOT, 'tools');
+
+function stderrText(result) {
+  if (!result) return '';
+  if (typeof result.stderr === 'string') return result.stderr;
+  if (result.stderr && typeof result.stderr.toString === 'function') return result.stderr.toString();
+  if (result.error?.message) return result.error.message;
+  return '';
+}
+
+function ffmpegAvailable() {
+  const probe = spawnSync('ffmpeg', ['-version'], { windowsHide: true });
+  return !probe.error && probe.status === 0;
+}
+
+const HAS_FFMPEG = ffmpegAvailable();
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -89,6 +106,66 @@ media.m3u8
   ok(isYouTubeUrl('https://www.youtube.com/watch?v=abc123') === true, 'utils: detecta URL do YouTube');
   ok(detectSourceType('https://www.youtube.com/watch?v=abc123') === 'youtube', 'utils: tipo youtube');
   ok(resolveSourceAdapter('https://www.youtube.com/watch?v=abc123').id === 'youtube', 'source-adapters: roteia para adaptador youtube');
+  const playerHtml = '<html><script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"abc123","title":"Teste","lengthSeconds":"12"},"streamingData":{"formats":[],"adaptiveFormats":[]}};</script><script src="/s/player/abcd1234/player_ias.vflset/en_US/base.js"></script></html>';
+  ok(
+    extractPlayerJsUrl(playerHtml, 'https://www.youtube.com/watch?v=abc123') === 'https://www.youtube.com/s/player/abcd1234/player_ias.vflset/en_US/base.js',
+    'youtube-signature: extrai URL do player JS'
+  );
+  const fakePlayerJs = `
+    var XY={rv:function(a){a.reverse()},sw:function(a,b){var c=a[0];a[0]=a[b%a.length];a[b]=c},sp:function(a,b){a.splice(0,b)}};
+    var Zq=function(a){a=a.split("");XY.sw(a,2);XY.rv(a);XY.sp(a,1);return a.join("")};
+    var Nq=function(a){a=a.split("");XY.rv(a);return a.join("")};
+    something.sig||Zq("x");
+    x.get("n"))&&(b=Nq(b));
+  `;
+  ok(decipherYouTubeSignature('abcdef', fakePlayerJs) === 'edabc', `youtube-signature: decipher simples (${decipherYouTubeSignature('abcdef', fakePlayerJs)})`);
+  const applied = applySignatureCipher('url=https%3A%2F%2Fvideo.example%2Fv.mp4%3Ffoo%3D1&sp=sig&s=abcdef', fakePlayerJs);
+  ok(applied.includes('sig=edabc'), `youtube-signature: aplica signatureCipher (${applied})`);
+  ok(transformYouTubeNParam('abcdef', fakePlayerJs) === 'fedcba', `youtube-signature: transforma n (${transformYouTubeNParam('abcdef', fakePlayerJs)})`);
+  ok(applyNTransform('https://video.example/v.mp4?n=abcdef&x=1', fakePlayerJs).includes('n=fedcba'), 'youtube-signature: aplica transformacao do n');
+  const youtubeHtml = `
+    <html><body><script>
+      var ytInitialPlayerResponse = {"videoDetails":{"videoId":"abc123","title":"Teste YouTube","lengthSeconds":"12"},"streamingData":{"formats":[{"itag":18,"url":"https://video.example/prog.mp4","mimeType":"video/mp4; codecs=\\"avc1.42001E, mp4a.40.2\\"","qualityLabel":"360p","bitrate":500000,"width":640,"height":360,"audioQuality":"AUDIO_QUALITY_LOW"}],"adaptiveFormats":[{"itag":137,"signatureCipher":"url=https%3A%2F%2Fvideo.example%2Fv137&sp=sig&s=abcd","mimeType":"video/mp4; codecs=\\"avc1.640028\\"","qualityLabel":"1080p","bitrate":2500000,"width":1920,"height":1080}]}}
+    </script></body></html>`;
+  const youtubePlayerResponse = extractInitialPlayerResponse(youtubeHtml);
+  const youtubeInfo = parseYouTubePlayerResponse(youtubePlayerResponse, 'https://www.youtube.com/watch?v=abc123');
+  ok(youtubeInfo.title === 'Teste YouTube', `youtube: extrai titulo (${youtubeInfo.title})`);
+  ok(youtubeInfo.progressiveFormats.length === 1, `youtube: 1 formato progressivo (${youtubeInfo.progressiveFormats.length})`);
+  ok(youtubeInfo.variants.length === 1, `youtube: variants progressivos expostos (${youtubeInfo.variants.length})`);
+  const youtubeAdaptiveHtml = `
+    <html><body><script>
+      var ytInitialPlayerResponse = {"videoDetails":{"videoId":"abc123","title":"Teste Adaptive","lengthSeconds":"12"},"streamingData":{"formats":[],"adaptiveFormats":[{"itag":137,"url":"https://video.example/v137.mp4","mimeType":"video/mp4; codecs=\\"avc1.640028\\"","qualityLabel":"1080p","bitrate":2500000,"width":1920,"height":1080},{"itag":140,"url":"https://video.example/a140.m4a","mimeType":"audio/mp4; codecs=\\"mp4a.40.2\\"","bitrate":128000,"audioQuality":"AUDIO_QUALITY_MEDIUM"}]}}
+    </script></body></html>`;
+  const youtubeAdaptiveInfo = parseYouTubePlayerResponse(
+    extractInitialPlayerResponse(youtubeAdaptiveHtml),
+    'https://www.youtube.com/watch?v=abc123'
+  );
+  ok(youtubeAdaptiveInfo.adaptiveVideoFormats.length === 1, `youtube: 1 formato adaptativo de video (${youtubeAdaptiveInfo.adaptiveVideoFormats.length})`);
+  ok(youtubeAdaptiveInfo.adaptiveAudioFormats.length === 1, `youtube: 1 formato adaptativo de audio (${youtubeAdaptiveInfo.adaptiveAudioFormats.length})`);
+  ok(youtubeAdaptiveInfo.variants.length === 1, `youtube: variants expostas para adaptive (${youtubeAdaptiveInfo.variants.length})`);
+  const youtubeMixedHtml = `
+    <html><body><script>
+      var ytInitialPlayerResponse = {"videoDetails":{"videoId":"abc123","title":"Teste Mixed","lengthSeconds":"12"},"streamingData":{"formats":[{"itag":18,"url":"https://video.example/360.mp4","mimeType":"video/mp4; codecs=\\"avc1.42001E, mp4a.40.2\\"","qualityLabel":"360p","bitrate":500000,"width":640,"height":360,"audioQuality":"AUDIO_QUALITY_LOW"}],"adaptiveFormats":[{"itag":137,"url":"https://video.example/1080.mp4","mimeType":"video/mp4; codecs=\\"avc1.640028\\"","qualityLabel":"1080p","bitrate":2500000,"width":1920,"height":1080},{"itag":140,"url":"https://video.example/audio.m4a","mimeType":"audio/mp4; codecs=\\"mp4a.40.2\\"","bitrate":128000,"audioQuality":"AUDIO_QUALITY_MEDIUM"}]}}
+    </script></body></html>`;
+  const youtubeMixedInfo = parseYouTubePlayerResponse(
+    extractInitialPlayerResponse(youtubeMixedHtml),
+    'https://www.youtube.com/watch?v=abc123'
+  );
+  ok(youtubeMixedInfo.variants[0].sourceKind === 'adaptive' && youtubeMixedInfo.variants[0].height === 1080, `youtube: melhor variante prioriza adaptive 1080p (${youtubeMixedInfo.variants[0].height}p)`);
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => ({
+    status: String(url).includes('/1080') || String(url).includes('/audio') ? 206 : 403,
+    url: String(url),
+  });
+  try {
+    const preparedAdaptive = await prepareYouTubeDownload({ analysis: youtubeMixedInfo, selectedUrl: 'youtube-adaptive:137' });
+    ok(preparedAdaptive.strategy === 'mux', `youtube: escolhe mux para 1080p adaptativo (${preparedAdaptive.strategy})`);
+    ok(preparedAdaptive.videoUrl.includes('/1080'), `youtube: usa video adaptativo validado (${preparedAdaptive.videoUrl})`);
+    const preparedFallback = await prepareYouTubeDownload({ analysis: youtubeMixedInfo, selectedUrl: 'https://video.example/360.mp4' });
+    ok(preparedFallback.strategy === 'mux', `youtube: fallback ainda prioriza melhor qualidade valida (${preparedFallback.strategy})`);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 
   // ---- 0.1) unidade: mdstrm (extração de videoId + URL do player) ----
   const cdnUrl = 'https://us-b4-p-e-qg12.cdn.mdstrm.com/video/h/5e6f83ae335cdd1163e16b5b/6a03573096d73ba91827573a_6a03573096d73ba91827574b.mp4/index-v1-a1.m3u8?cP=2063000&pid=abc&sid=def&uid=ghi';
@@ -122,6 +199,11 @@ fs.copyFileSync(
 console.log('Fake curl v1.x criado: tools\\curl_chrome999.exe (cópia do curl.exe do Windows)\n');
 
 async function runCase({ label, encrypted, fmp4 }) {
+  if (!HAS_FFMPEG) {
+    console.log(`[SKIP] ${label}: FFmpeg nao esta disponivel no PATH para os testes E2E.`);
+    return;
+  }
+
   console.log(`\n================ CASO: ${label} ================\n`);
 
   fs.rmSync(E2E_DIR, { recursive: true, force: true });
@@ -156,7 +238,7 @@ async function runCase({ label, encrypted, fmp4 }) {
   const gen = spawnSync('ffmpeg', args, { cwd: E2E_DIR, windowsHide: true });
   ok(gen.status === 0, `gerou HLS (${label}) com FFmpeg (exit ${gen.status})`);
   if (gen.status !== 0) {
-    console.log(gen.stderr.toString().slice(-1500));
+    console.log(stderrText(gen).slice(-1500));
     return;
   }
 
@@ -221,7 +303,7 @@ media.m3u8
   ok(size > 100000, `[${label}] MP4 gerado (${size} bytes)`);
 
   const r = spawnSync('ffmpeg', ['-i', mp4, '-f', 'null', '-'], { windowsHide: true });
-  const stderr = r.stderr.toString();
+  const stderr = stderrText(r);
   const dur = stderr.match(/Duration:\s*([0-9:.]+)/)?.[1];
   ok(/Duration:\s*00:00:0[4-9]/.test(stderr), `[${label}] MP4 válido (duration ${dur})`);
 
@@ -233,6 +315,11 @@ media.m3u8
 }
 
 async function runDirectCase() {
+  if (!HAS_FFMPEG) {
+    console.log('[SKIP] arquivo direto MP4: FFmpeg nao esta disponivel no PATH para os testes E2E.');
+    return;
+  }
+
   console.log('\n================ CASO: arquivo direto MP4 ================\n');
   fs.rmSync(E2E_DIR, { recursive: true, force: true });
   fs.mkdirSync(E2E_DIR, { recursive: true });
@@ -248,7 +335,7 @@ async function runDirectCase() {
   ], { windowsHide: true });
   ok(gen.status === 0, `gerou MP4 direto com FFmpeg (exit ${gen.status})`);
   if (gen.status !== 0) {
-    console.log(gen.stderr.toString().slice(-1500));
+    console.log(stderrText(gen).slice(-1500));
     return;
   }
 
@@ -283,6 +370,11 @@ async function runDirectCase() {
 }
 
 async function runDashCase() {
+  if (!HAS_FFMPEG) {
+    console.log('[SKIP] manifesto DASH (.mpd): FFmpeg nao esta disponivel no PATH para os testes E2E.');
+    return;
+  }
+
   console.log('\n================ CASO: manifesto DASH (.mpd) ================\n');
   fs.rmSync(E2E_DIR, { recursive: true, force: true });
   fs.mkdirSync(E2E_DIR, { recursive: true });
@@ -298,7 +390,7 @@ async function runDashCase() {
   ], { cwd: E2E_DIR, windowsHide: true });
   ok(gen.status === 0, `gerou DASH com FFmpeg (exit ${gen.status})`);
   if (gen.status !== 0) {
-    console.log(gen.stderr.toString().slice(-1500));
+    console.log(stderrText(gen).slice(-1500));
     return;
   }
 

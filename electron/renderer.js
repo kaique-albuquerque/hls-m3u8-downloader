@@ -270,7 +270,7 @@ function addTab() {
       state.sourceUrl = url;
       state.analysisBaseUrl = info.baseUrl || url;
 
-      if (info.kind === 'master') {
+      if (info.kind === 'master' || info.kind === 'youtube') {
         state.qualities = info.variants;
         state.selectedVariantUri = info.variants[0]?.uri || '';
         state.selectedQuality = state.selectedVariantUri
@@ -279,8 +279,15 @@ function addTab() {
         renderQualities(state);
         setActiveStep(state, 'variant');
         markAllPreviousAsDone(state, 'variant');
-        setStatus(state, 'Qualidades encontradas. Se nada for escolhido, a melhor disponivel sera usada.');
-        appendLog(state, `Qualidades encontradas: ${info.variants.length}`);
+        setStatus(
+          state,
+          info.kind === 'youtube'
+            ? `Formatos progressivos do YouTube encontrados para "${info.title}".`
+            : 'Qualidades encontradas. Se nada for escolhido, a melhor disponivel sera usada.'
+        );
+        appendLog(state, info.kind === 'youtube'
+          ? `Formatos progressivos do YouTube: ${info.variants.length}`
+          : `Qualidades encontradas: ${info.variants.length}`);
       } else if (info.kind === 'dash') {
         state.qualities = [];
         state.selectedVariantUri = '';

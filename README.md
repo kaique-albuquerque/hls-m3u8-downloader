@@ -35,7 +35,9 @@ cd video-downloader
 npm install
 ```
 
-> O programa em si **não usa dependências de runtime** — dá para rodar direto com `node src/index.js` sem `npm install`. O `npm install` instala apenas o **ntl** (menu opcional de scripts) como dependência de desenvolvimento.
+> O programa em si **não usa dependências de runtime** — dá para rodar direto com `node src/index.js` sem `npm install`. O `npm install` instala apenas o **ntl** (menu opcional de scripts) como dependência de desenvolvimento. Exceção: para downloads do **YouTube** e de **redes sociais**, o `npm install` também baixa o binário standalone do **yt-dlp** (pacote `youtube-dl-exec`) na primeira instalação.
+
+> **Redes sociais:** além de YouTube, o adaptador social (motor yt-dlp) cobre **Facebook, Instagram, TikTok, X/Twitter, Reddit, Twitch, Vimeo, Dailymotion, LinkedIn, Bilibili, VK** e mais de 1.800 sites suportados pelo yt-dlp. Basta colar a URL do post/vídeo — o programa detecta a plataforma automaticamente e oferece as qualidades disponíveis. Conteúdo privado/login exige cookies (ainda não automatizado) e conteúdo com DRM não é suportado.
 
 ---
 
@@ -102,6 +104,30 @@ node src/index.js --referer "https://exemplo.com/" --origin "https://exemplo.com
 - `--help` — mostra a ajuda
 
 Os mesmos headers podem ser definidos em um arquivo `config.json` na pasta do projeto (veja `config.example.json`). Os valores informados na linha de comando têm prioridade sobre o arquivo.
+
+---
+
+### 🎬 Download do YouTube (melhor resolução)
+
+```powershell
+npm run download:youtube
+```
+
+Cole uma URL de vídeo do YouTube (ex.: `https://www.youtube.com/watch?v=...` ou `https://youtu.be/...`). O programa lista as **qualidades encontradas** (2160p/1440p/1080p/720p/...) e baixa a escolhida na **melhor resolução disponível** — para vídeos 4K, baixa o vídeo e o melhor áudio separadamente e **junta com o FFmpeg** (`-c copy`, sem perda de qualidade).
+
+```
+Qualidades encontradas:
+  1. 2160p  ~13.47 Mbps
+  2. 2160p  ~9.02 Mbps
+  3. 1440p  ~5.67 Mbps
+  4. 1080p  ~3.04 Mbps
+  ...
+  0. Cancelar
+
+Escolha (Enter = melhor disponivel): 
+```
+
+> ℹ️ A resolução do YouTube é resolvida pelo **yt-dlp** (binário standalone, baixado automaticamente na instalação pelo pacote `youtube-dl-exec` — sem precisar de Python). O yt-dlp mantém atualizada a lógica de decifração de assinaturas, transformação do parâmetro `n`, tokens de prova de origem (POT) e o novo streaming SABR do YouTube, que quebram implementações caseiras com frequência. Os links gerados são baixados pelo FFmpeg local, com os mesmos modos de fallback do restante do programa.
 
 ---
 
@@ -264,13 +290,31 @@ video-downloader/
     install-ffmpeg.mjs  # baixa/instala o FFmpeg em vendor/ffmpeg/ (postinstall)
   test-curl-e2e.mjs     # suíte E2E: gera HLS local (AES-128/fMP4), testa download e conversão mdstrm
   src/
-    index.js      # fluxo principal (CLI)
-    ffmpeg.js     # verificação e execução do FFmpeg (local em vendor/ ou PATH)
-    hls.js        # parsing de playlists e resoluções
-    curlimp.js    # detecção/invocação do curl-impersonate (v2.x e v1.x)
-    mdstrm.js     # conversão automática de URLs da Mídia Stream (CDN → player)
-    input.js      # prompts interativos
-    utils.js      # URLs, máscara, nomes de arquivo, helpers
+    index.js          # fluxo principal (CLI)
+    cli-flow.js       # orquestração da sessão CLI (enxuto)
+    cli/              # módulos do fluxo CLI
+      context.js      # contexto, MODE_LABELS, interrupção (Ctrl+C)
+      ui.js           # impressões, seleção de variante, nome de arquivo
+      progress.js     # barra de progresso (CLI e Electron)
+      config.js       # config.json, headers de CLI/DevTools
+      download.js     # fluxos FFmpeg (direto e mux de vídeo+áudio)
+      curl-flow.js    # fluxo curl-impersonate (segmentos HLS)
+    adapters/         # adaptadores de fonte (contrato analyze/prepareDownload)
+      ytdlp.js        # motor genérico yt-dlp (qualquer site suportado)
+      youtube.js      # adaptador fino de YouTube
+      social.js       # adaptador fino de redes sociais (Facebook, Instagram,
+                      # TikTok, X/Twitter, Reddit, Twitch, Vimeo, etc.)
+    source-adapters.js  # roteamento URL → adaptador
+    legacy/           # motor antigo de YouTube (SABR) — só usado pelo teste E2E
+      youtube.js
+      youtube-signature.js
+    ffmpeg.js       # verificação e execução do FFmpeg (local em vendor/ ou PATH)
+    hls.js          # parsing de playlists e resoluções
+    dash.js         # parsing de manifestos DASH
+    curlimp.js      # detecção/invocação do curl-impersonate (v2.x e v1.x)
+    mdstrm.js       # conversão automática de URLs da Mídia Stream (CDN → player)
+    input.js        # prompts interativos
+    utils.js        # URLs, máscara, nomes de arquivo, helpers
 ```
 
 ### Testes
