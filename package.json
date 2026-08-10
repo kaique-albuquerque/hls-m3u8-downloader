@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "description": "Downloader de vídeos HLS (.m3u8) com suporte automático à Mídia Stream (mdstrm) via curl-impersonate. Requer apenas Node.js — o FFmpeg é instalado automaticamente.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "electron/main.js",
   "scripts": {
     "download:curl": "node src/index.js --curl-impersonate",
+    "electron:dev": "electron .",
+    "electron:serve": "electron .",
     "test": "node test-curl-e2e.mjs",
     "ffmpeg:install": "node scripts/install-ffmpeg.mjs",
     "postinstall": "node scripts/install-ffmpeg.mjs"
@@ -26,6 +28,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "electron": "^37.2.6",
     "ntl": "^5.1.0"
   }
 }

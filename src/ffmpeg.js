@@ -1,18 +1,23 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+const VENDOR_DIR = path.join(PROJECT_ROOT, 'vendor', 'ffmpeg');
+const BIN_NAME = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+const BIN_PATH = path.join(VENDOR_DIR, BIN_NAME);
+const INSTALLED_MARKER = path.join(VENDOR_DIR, '.installed');
+const INSTALLED_VERSION = path.join(VENDOR_DIR, '.version');
 
 /**
  * Caminho do FFmpeg local (instalado por scripts/install-ffmpeg.mjs em
  * vendor/ffmpeg/). Se não existir, usa o comando 'ffmpeg' do PATH.
  */
 export function getFfmpegCommand() {
-  const local = path.join(PROJECT_ROOT, 'vendor', 'ffmpeg', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-  return fs.existsSync(local) ? local : 'ffmpeg';
+  if (isLocalFfmpegReady()) return BIN_PATH;
+  return 'ffmpeg';
 }
 
 // Modos de extração. Sempre começamos com -c copy (sem recodificação,
@@ -29,20 +34,19 @@ const MODES = [
  * Retorna true/false (nunca lança exceção).
  */
 export function checkFfmpeg() {
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawn(getFfmpegCommand(), ['-version'], { windowsHide: true });
-    } catch {
-      resolve(false);
-      return;
-    }
-    let out = '';
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.stderr.on('data', (d) => { out += d.toString(); });
-    child.on('error', () => resolve(false));
-    child.on('close', (code) => resolve(code === 0 && /ffmpeg version/i.test(out)));
-  });
+  try {
+    const cmd = getFfmpegCommand();
+    const r = spawnSync(cmd, ['-version'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    return Promise.resolve(r.status === 0 && /ffmpeg version/i.test(out));
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+function isLocalFfmpegReady() {
+  if (!fs.existsSync(BIN_PATH) || !fs.existsSync(INSTALLED_MARKER)) return false;
+  return true;
 }
 
 /**

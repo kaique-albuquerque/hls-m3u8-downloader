@@ -623,7 +623,7 @@ async function main() {
   // 1) Verifica o FFmpeg
   console.log('\nVerificando FFmpeg...');
   if (!(await checkFfmpeg())) {
-    console.error('\n[ERRO] FFmpeg não foi encontrado no PATH do sistema.');
+    console.error('\n[ERRO] FFmpeg não foi encontrado localmente nem no PATH do sistema.');
     printFfmpegHelp();
     exit(1);
   }
