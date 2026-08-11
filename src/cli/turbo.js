@@ -3,44 +3,29 @@ import os from 'node:os';
 import path from 'node:path';
 import { startMuxDownload } from '../ffmpeg.js';
 import { formatBytes } from '../utils.js';
+import { downloadParallelRanges, probeRangeSupport } from '../transports/range.js';
 import { createProgressReporter } from './progress.js';
 import { cleanupPartial } from './download.js';
 
 /** Quantidade padrao de conexoes paralelas no modo turbo. */
 export const DEFAULT_TURBO_CHUNKS = 8;
 
-const EMIT_INTERVAL_MS = 200;
-
 /**
  * Verifica se o servidor aceita Range (download por partes). Dispara uma
  * requisicao "bytes=0-0": se responder 206 com content-range, o turbo e valido.
+ * (P4: delega ao transporte Range — `probeRangeSupport`.)
  */
 async function probeRange(url, headers, signal) {
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { ...headers, Range: 'bytes=0-0' },
-    signal,
-    redirect: 'follow',
-  });
-  try {
-    if (res.status === 206) {
-      const m = /bytes\s+\d+-\d+\/(\d+)/.exec(res.headers.get('content-range') || '');
-      const total = m ? Number(m[1]) : 0;
-      return { ok: total > 0, total };
-    }
-    return { ok: false, total: 0 };
-  } finally {
-    await res.body?.cancel?.().catch(() => {});
-  }
+  const probe = await probeRangeSupport(url, { headers, signal });
+  return { ok: probe.ok, total: probe.total };
 }
 
 /**
- * Baixa um arquivo (URL direta) em N conexoes paralelas via HTTP Range,
- * escrevendo cada parte na posicao correta do arquivo final.
+ * Fluxo turbo (P4): delega ao transporte Range (`src/transports/range.js`),
+ * mantendo a API publica atual:
+ *   { ok: true } | { ok: false, error: 'no-range' } | { ok: false, interrupted: true } | { ok: false, error: 'other' }
  *
- * Retorna { ok: true } em sucesso, { ok: false, error: 'no-range' } quando o
- * servidor nao suporta Range (chamador deve cair no fluxo FFmpeg normal) e
- * { ok: false, interrupted: true } em cancelamento.
+ * `signal` (opcional) e um AbortController — mesmo contrato dos fluxos legados.
  */
 export async function runTurboDownloadFlow(ctx, {
   url,
@@ -54,18 +39,15 @@ export async function runTurboDownloadFlow(ctx, {
   const ownAbort = new AbortController();
   const abort = signal || ownAbort;
   if (!signal) ctx.turboAbort = ownAbort;
-
-  const started = Date.now();
-  let downloaded = 0;
-  let lastEmit = 0;
-  let fh = null;
+  const sig = abort.signal;
 
   try {
+    // 1) Sonda o suporte a Range para informar o total ao reporter de progresso.
     let probe;
     try {
-      probe = await probeRange(url, headers, abort.signal);
+      probe = await probeRange(url, headers, sig);
     } catch (err) {
-      if (abort.signal.aborted) return { ok: false, interrupted: true };
+      if (sig.aborted) return { ok: false, interrupted: true };
       ctx.io.log(`[AVISO] Turbo: ${err.message}`);
       return { ok: false, error: 'no-range' };
     }
@@ -76,76 +58,27 @@ export async function runTurboDownloadFlow(ctx, {
 
     const total = probe.total;
     const progress = createProgressReporter(ctx.io, { totalBytes: total, durationMs, label });
-
-    const emit = () => {
-      const now = Date.now();
-      if (now - lastEmit < EMIT_INTERVAL_MS) return;
-      lastEmit = now;
-      const elapsed = (now - started) / 1000;
-      const speed = elapsed > 0 ? downloaded / elapsed : 0;
-      const hh = String(Math.floor(elapsed / 3600)).padStart(2, '0');
-      const mm = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
-      const ss = String(Math.floor(elapsed % 60)).padStart(2, '0');
-      progress.update({ key: 'out_time', value: `${hh}:${mm}:${ss}` });
-      progress.update({ key: 'total_size', value: downloaded });
-      progress.update({ key: 'speed', value: `${formatBytes(speed)}/s` });
+    const onTransportProgress = (u) => {
+      if (u.bytesDownloaded != null) progress.update({ key: 'total_size', value: u.bytesDownloaded });
+      if (u.speed) progress.update({ key: 'speed', value: `${formatBytes(u.speed)}/s` });
     };
 
-    // Divide o arquivo em intervalos [inicio, fim].
-    const chunkSize = Math.ceil(total / chunkCount);
-    const ranges = [];
-    for (let i = 0; i < chunkCount; i++) {
-      const start = i * chunkSize;
-      if (start >= total) break;
-      ranges.push([start, Math.min(total - 1, start + chunkSize - 1)]);
-    }
+    // 2) Limite de conexoes do ResourceManager (quando presente no ctx).
+    const available = ctx.resourceLimiter?.connections?.available;
+    const concurrency = available != null ? Math.max(1, Math.min(chunkCount, available || 1)) : chunkCount;
 
-    try {
-      fh = await fs.promises.open(output, 'w');
-      await fh.truncate(total);
-    } catch (err) {
-      ctx.io.log(`[AVISO] Turbo: nao foi possivel criar o arquivo final: ${err.message}`);
-      return { ok: false, error: 'other' };
-    }
-
-    const chunkTasks = ranges.map(async ([start, end]) => {
-      const chunkAbort = new AbortController();
-      const onAbort = () => chunkAbort.abort();
-      abort.signal.addEventListener('abort', onAbort, { once: true });
-      try {
-        const res = await fetch(url, {
-          method: 'GET',
-          headers: { ...headers, Range: `bytes=${start}-${end}` },
-          signal: chunkAbort.signal,
-          redirect: 'follow',
-        });
-        if (res.status !== 206 || !res.body) {
-          const err = new Error('o servidor nao respondeu 206 para Range');
-          err.code = 'TURBO_NO_RANGE';
-          throw err;
-        }
-        const reader = res.body.getReader();
-        let pos = start;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value?.byteLength) {
-            await fh.write(value, 0, value.byteLength, pos);
-            pos += value.byteLength;
-            downloaded += value.byteLength;
-            emit();
-          }
-        }
-      } finally {
-        abort.signal.removeEventListener('abort', onAbort);
-      }
+    // 3) Download paralelo via transporte Range.
+    await downloadParallelRanges({
+      url,
+      output,
+      headers,
+      signal: sig,
+      chunkCount,
+      concurrency,
+      onProgress: onTransportProgress,
     });
 
-    await Promise.all(chunkTasks);
-    await fh.close().catch(() => {});
-    fh = null;
-
-    if (abort.signal.aborted) {
+    if (sig.aborted) {
       cleanupPartial(output);
       return { ok: false, interrupted: true };
     }
@@ -153,14 +86,14 @@ export async function runTurboDownloadFlow(ctx, {
     progress.update({ key: 'total_size', value: total });
     progress.update({ key: 'progress', value: 'end' });
     progress.finish();
-    ctx.io.log(`[turbo] Download concluido com ${ranges.length} conexoes paralelas.`);
+    ctx.io.log(`[turbo] Download concluido com ${chunkCount} conexoes paralelas.`);
     return { ok: true };
   } catch (err) {
-    if (abort.signal.aborted) {
+    if (sig.aborted) {
       cleanupPartial(output);
       return { ok: false, interrupted: true };
     }
-    if (err?.code === 'TURBO_NO_RANGE') {
+    if (err?.code === 'RANGE_UNSUPPORTED' || err?.code === 'INVALID_CONTENT_RANGE') {
       ctx.io.log('[AVISO] Turbo: o servidor parou de responder Range no meio do download. Usando fluxo normal.');
       cleanupPartial(output);
       return { ok: false, error: 'no-range' };
@@ -169,7 +102,6 @@ export async function runTurboDownloadFlow(ctx, {
     cleanupPartial(output);
     return { ok: false, error: 'other' };
   } finally {
-    if (fh) await fh.close().catch(() => {});
     if (!signal) ctx.turboAbort = null;
   }
 }

@@ -20,6 +20,7 @@ export function sourceLooksLikeYouTubeWatch(url) {
 export function createContext(io) {
   return {
     currentFfmpeg: null,
+    currentHttpAbort: null,
     interruptHandled: false,
     curlimpActive: false,
     io,
@@ -38,6 +39,11 @@ export function onInterrupt(ctx) {
   if (ctx.turboAbort) {
     ctx.io.log('\n\nCancelando o download paralelo (turbo)... (aguarde)');
     ctx.turboAbort.abort();
+    return;
+  }
+  if (ctx.currentHttpAbort) {
+    ctx.io.log('\n\nCancelando o download (transport http)... (aguarde)');
+    ctx.currentHttpAbort.abort();
     return;
   }
   if (ctx.curlimpActive) {
