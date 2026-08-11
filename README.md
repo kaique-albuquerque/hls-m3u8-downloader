@@ -23,10 +23,10 @@ Aplicativo **CLI em Node.js** (com interface **Electron** opcional) para baixar 
 ### Requisitos
 
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
-- **Windows 10/11** (também funciona em macOS/Linux, mas a instalação automática do FFmpeg é só no Windows)
-- **FFmpeg** — é baixado **automaticamente** pelo `npm install` (para `vendor/ffmpeg/`). Alternativamente, instale manualmente e adicione ao PATH.
+- **Windows 10/11** (também funciona em macOS/Linux)
+- **FFmpeg** — no Windows é baixado **automaticamente** pelo `npm install` (para `vendor/ffmpeg/`). Em macOS/Linux, instale manualmente e adicione ao PATH.
 
-> 💡 O `npm install` roda um script (`postinstall`) que baixa o build *essentials* do FFmpeg (gyan.dev) e o instala localmente em `vendor/ffmpeg/`. O programa usa o binário local se existir; senão, usa o `ffmpeg` do PATH. Para instalar/atualizar manualmente: `npm run ffmpeg:install`.
+> 💡 O `npm install` roda scripts (`postinstall`) que validam o Electron e o FFmpeg. No Windows, o FFmpeg é baixado e instalado localmente em `vendor/ffmpeg/`. Em macOS/Linux, o instalador apenas espera que `ffmpeg` já exista no PATH. Para reparar o Electron manualmente: `npm run electron:install`. Para instalar/atualizar o FFmpeg local no Windows: `npm run ffmpeg:install`.
 
 ---
 
@@ -34,6 +34,20 @@ Aplicativo **CLI em Node.js** (com interface **Electron** opcional) para baixar 
 
 ```powershell
 cd streamgrab
+npm install
+```
+
+Linux:
+
+```bash
+sudo apt install ffmpeg unzip
+npm install
+```
+
+macOS:
+
+```bash
+brew install ffmpeg
 npm install
 ```
 

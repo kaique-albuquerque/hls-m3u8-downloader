@@ -60,9 +60,10 @@ if (pathFfmpeg) {
 }
 
 if (!FFmpeg_URLS.length) {
-  console.log('[ffmpeg] Instalação automática suportada apenas no Windows.');
-  console.log('[ffmpeg] Instale o FFmpeg manualmente e adicione ao PATH: https://ffmpeg.org/download.html');
-  process.exit(1);
+  console.log('[ffmpeg] Instalação automática local suportada apenas no Windows.');
+  console.log('[ffmpeg] Em Linux/macOS, instale o FFmpeg no sistema e adicione ao PATH.');
+  console.log('[ffmpeg] Exemplos: sudo apt install ffmpeg | sudo dnf install ffmpeg | brew install ffmpeg');
+  process.exit(0);
 }
 
 console.log('[ffmpeg] Baixando FFmpeg...');

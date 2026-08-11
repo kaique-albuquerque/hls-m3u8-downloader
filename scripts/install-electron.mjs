@@ -135,5 +135,29 @@ function extractArchive(zipPath, destinationDir) {
     return;
   }
 
-  throw new Error('recuperação automática do Electron ainda não foi implementada para esta plataforma');
+  if (process.platform === 'darwin') {
+    const extract = spawnSync('ditto', ['-x', '-k', zipPath, destinationDir], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 180000,
+    });
+
+    if (extract.status !== 0) {
+      throw new Error(`falha ao extrair ZIP do Electron: ${extract.stderr || extract.stdout || 'erro desconhecido'}`);
+    }
+
+    return;
+  }
+
+  const extract = spawnSync('unzip', ['-q', zipPath, '-d', destinationDir], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 180000,
+  });
+
+  if (extract.status !== 0) {
+    throw new Error(
+      'falha ao extrair ZIP do Electron. Instale `unzip` no sistema e rode `npm run electron:install` novamente.'
+    );
+  }
 }
