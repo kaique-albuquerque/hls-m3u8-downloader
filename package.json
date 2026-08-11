@@ -37,7 +37,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "electron": "^37.2.6",
+    "electron": "^37.10.3",
     "eslint": "^10.8.1",
     "ntl": "^5.1.0",
     "prettier": "^3.9.6"
@@ -46,6 +46,7 @@
     "youtube-dl-exec": "^3.1.12"
   },
   "allowScripts": {
-    "youtube-dl-exec@3.1.12": true
+    "youtube-dl-exec@3.1.12": true,
+    "electron@37.10.3": true
   }
 }
