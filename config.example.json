@@ -1,4 +1,5 @@
 {
+  "_comentario_geral": "StreamGrab — configuracao de exemplo. Copie para config.json e ajuste. Chaves com prefixo _ sao apenas comentarios e sao ignoradas.",
   "headers": {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Referer": "https://exemplo.com/",

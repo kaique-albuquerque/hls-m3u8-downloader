@@ -1,72 +1,37 @@
-import { fetchPlaylist } from './hls.js';
-import { fetchDashManifest } from './dash.js';
-import { detectSourceType, isSocialMediaUrl, isYouTubeUrl, probeMediaContentType, isDirectMediaContentType } from './utils.js';
-import { YOUTUBE_ADAPTER } from './adapters/youtube.js';
-import { SOCIAL_ADAPTER } from './adapters/social.js';
-
-export function resolveSourceAdapter(url) {
-  if (isYouTubeUrl(url)) return YOUTUBE_ADAPTER;
-  if (isSocialMediaUrl(url)) return SOCIAL_ADAPTER;
-
-  const sourceType = detectSourceType(url);
-  if (sourceType === 'hls') return HLS_ADAPTER;
-  if (sourceType === 'dash') return DASH_ADAPTER;
-  if (sourceType === 'direct') return DIRECT_ADAPTER;
-  return UNKNOWN_ADAPTER;
-}
-
 /**
- * Como resolveSourceAdapter, mas quando a URL nao tem extensao reconhecida
- * faz um probe de content-type no servidor: se responder video/* ou audio/*,
- * trata como midia direta (ex.: https://embed-api.clickhost.xyz/embed/stream/...).
+ * Fachada de compatibilidade sobre o ProviderRegistry (P3).
+ *
+ * A API legada (resolveSourceAdapter / resolveSourceAdapterAsync → adapters
+ * com { id, label, supportsQualitySelection, analyze, prepareDownload }) é
+ * preservada para consumidores existentes (CLI, engine, Electron, testes).
+ *
+ * Internamente, a detecção agora delega ao registry de providers:
+ *   - youtube/social  → provider ytdlp
+ *   - hls (incl. mdstrm) → provider hls
+ *   - dash             → provider dash
+ *   - direct           → provider direct
+ *   - desconhecida     → probe de Content-Type (URLs sem extensão vira direta
+ *                        quando o servidor responder video/* ou audio/*)
  */
-export async function resolveSourceAdapterAsync(url, headers = {}) {
-  const adapter = resolveSourceAdapter(url);
-  if (adapter.id !== 'unknown') return adapter;
-  const contentType = await probeMediaContentType(url, headers);
-  if (isDirectMediaContentType(contentType)) return { ...DIRECT_ADAPTER, detectedContentType: contentType };
-  return adapter;
-}
 
-const HLS_ADAPTER = {
-  id: 'hls',
-  label: 'HLS (.m3u8)',
-  supportsQualitySelection: true,
-  async analyze({ url, headers }) {
-    return fetchPlaylist(url, headers);
-  },
-  async prepareDownload({ url }) {
-    return { downloadUrl: url };
-  },
-};
+import { isYouTubeUrl } from './utils.js';
+import { createDefaultProviderRegistry } from './providers/registry.js';
 
-const DASH_ADAPTER = {
-  id: 'dash',
-  label: 'DASH (.mpd)',
-  supportsQualitySelection: false,
-  async analyze({ url, headers }) {
-    return fetchDashManifest(url, headers);
-  },
-  async prepareDownload({ url }) {
-    return { downloadUrl: url };
-  },
-};
+const registry = createDefaultProviderRegistry();
 
-const DIRECT_ADAPTER = {
-  id: 'direct',
-  label: 'midia direta',
-  supportsQualitySelection: false,
-  async analyze() {
-    return { kind: 'direct' };
-  },
-  async prepareDownload({ url }) {
-    return { downloadUrl: url };
-  },
+/** Rótulos legados mantidos pela fachada (os providers têm rótulos próprios). */
+const LEGACY_LABELS = {
+  youtube: 'YouTube (yt-dlp)',
+  social: 'Redes sociais (yt-dlp)',
+  hls: 'HLS (.m3u8)',
+  dash: 'DASH (.mpd)',
+  direct: 'midia direta',
+  unknown: 'desconhecido',
 };
 
 const UNKNOWN_ADAPTER = {
   id: 'unknown',
-  label: 'desconhecido',
+  label: LEGACY_LABELS.unknown,
   supportsQualitySelection: false,
   async analyze() {
     const err = new Error('Fonte nao suportada.');
@@ -79,3 +44,39 @@ const UNKNOWN_ADAPTER = {
     throw err;
   },
 };
+
+/** Mapeia o provider de volta ao id legado da fachada. */
+function legacyAdapterId(provider, url) {
+  if (provider.id === 'ytdlp') return isYouTubeUrl(url) ? 'youtube' : 'social';
+  return provider.id;
+}
+
+/** Converte um provider em um adapter no shape legado. */
+function toAdapter(provider, url) {
+  if (!provider) return UNKNOWN_ADAPTER;
+  const id = legacyAdapterId(provider, url);
+  return {
+    id,
+    label: LEGACY_LABELS[id] || provider.label,
+    supportsQualitySelection: provider.supportsQualitySelection ?? false,
+    analyze: (params) => provider.analyze(params),
+    prepareDownload: (params) => provider.prepareDownload(params),
+  };
+}
+
+export function resolveSourceAdapter(url, opts) {
+  return toAdapter(registry.detect(url, opts), url);
+}
+
+/**
+ * Como resolveSourceAdapter, mas quando a URL não tem extensão reconhecida
+ * faz um probe de content-type no servidor: se responder video/* ou audio/*,
+ * trata como mídia direta (ex.: https://embed-api.clickhost.xyz/embed/stream/...).
+ */
+export async function resolveSourceAdapterAsync(url, headers = {}, opts = {}) {
+  const { provider, detectedContentType } = await registry.detectAsync(url, { headers, ...opts });
+  if (!provider) return UNKNOWN_ADAPTER;
+  const adapter = toAdapter(provider, url);
+  if (detectedContentType) adapter.detectedContentType = detectedContentType;
+  return adapter;
+}

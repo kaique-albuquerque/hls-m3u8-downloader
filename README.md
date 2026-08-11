@@ -1,6 +1,8 @@
 <div align="center">
 
-# Video Downloader — HLS (.m3u8) via FFmpeg
+# StreamGrab
+
+**Fast, universal video downloader for HLS, DASH, YouTube and the web.**
 
 | 🇧🇷 [Português](#pt) | 🇺🇸 [English](#en) | 🇪🇸 [Español](#es) |
 |---|---|---|
@@ -11,7 +13,7 @@
 
 <h2 id="pt">🇧🇷 Português</h2>
 
-Aplicação **CLI em Node.js** para baixar videoaulas reproduzidas via HLS (arquivos `.m3u8`) usando o **FFmpeg**, de forma simples e segura no Windows.
+Aplicativo **CLI em Node.js** (com interface **Electron** opcional) para baixar vídeos de **HLS (.m3u8)**, **DASH (.mpd)**, **YouTube**, **redes sociais** e **arquivos diretos** usando o **FFmpeg**, de forma simples e segura no Windows. Suporta Mídia Stream (mdstrm) via curl-impersonate, download paralelo (turbo) em URLs diretas e mux de vídeo+áudio para máxima qualidade.
 
 > ⚠️ **Uso responsável**
 > Esta ferramenta trabalha **somente** com URLs que você mesmo fornece e para as quais você já tem **acesso legítimo e autorizado** pela plataforma. Ela **não** faz bypass de DRM (Widevine etc.), não burla autenticação, não captura cookies do navegador, não descobre credenciais e não tenta acessar nada além do que a URL fornecida já permite.
@@ -31,7 +33,7 @@ Aplicação **CLI em Node.js** para baixar videoaulas reproduzidas via HLS (arqu
 ### Instalação
 
 ```powershell
-cd video-downloader
+cd streamgrab
 npm install
 ```
 
@@ -59,7 +61,7 @@ node src/index.js
 
 ```
 ==============================================
-   Video Downloader — HLS (.m3u8) via FFmpeg
+   StreamGrab — HLS / DASH / YouTube / Redes
 ==============================================
 
 Verificando FFmpeg...
@@ -251,7 +253,7 @@ Para CDNs com *fingerprinting TLS* (item 3 acima), o programa oferece um modo ex
 1. Acesse <https://github.com/lexiforest/curl-impersonate/releases> (projeto original: <https://github.com/lwthiker/curl-impersonate>) e baixe o pacote para Windows (ex.: `curl-impersonate-win64.zip`).
 2. Extraia o ZIP — o formato **v2.x** traz `curl-impersonate.exe` + vários `curl_chromeNNN.bat` / `curl_edgeNNN.bat` / `curl_firefoxNNN.bat`.
 3. Copie a pasta para **uma** destas opções:
-   - dentro deste projeto, em `video-downloader\tools\`; ou
+   - dentro deste projeto, em `streamgrab\tools\`; ou
    - adicione a pasta ao PATH do Windows.
 4. Rode novamente com `npm run download:curl`.
 
@@ -332,7 +334,7 @@ Pressione `Ctrl+C` a qualquer momento:
 ### Estrutura do projeto
 
 ```
-video-downloader/
+streamgrab/
   package.json
   config.example.json
   README.md
@@ -340,7 +342,10 @@ video-downloader/
   vendor/ffmpeg/        # FFmpeg local (baixado automaticamente pelo npm install)
   scripts/
     install-ffmpeg.mjs  # baixa/instala o FFmpeg em vendor/ffmpeg/ (postinstall)
-  test-curl-e2e.mjs     # suíte E2E: gera HLS local (AES-128/fMP4), testa download e conversão mdstrm
+  tests/
+    unit/               # testes unitários (node:test)
+    integration/        # testes de integração (servidores locais + FFmpeg)
+    e2e/                # suíte E2E: gera HLS local (AES-128/fMP4), MP4 direto, DASH e mdstrm
   src/
     index.js          # fluxo principal (CLI)
     cli-flow.js       # orquestração da sessão CLI (enxuto)
@@ -420,7 +425,7 @@ A **Node.js CLI application** to download videos streamed over HLS (`.m3u8` file
 ### Installation
 
 ```powershell
-cd video-downloader
+cd streamgrab
 npm install
 ```
 
@@ -446,7 +451,7 @@ node src/index.js
 
 ```
 ==============================================
-   Video Downloader — HLS (.m3u8) via FFmpeg
+   StreamGrab — HLS / DASH / YouTube / Social
 ==============================================
 
 Checking FFmpeg...
@@ -562,7 +567,7 @@ For CDNs with *TLS fingerprinting* (item 3 above), the program offers an extra m
 1. Go to <https://github.com/lexiforest/curl-impersonate/releases> (original project: <https://github.com/lwthiker/curl-impersonate>) and download the Windows package (e.g. `curl-impersonate-win64.zip`).
 2. Extract the ZIP — the **v2.x** format ships `curl-impersonate.exe` + several `curl_chromeNNN.bat` / `curl_edgeNNN.bat` / `curl_firefoxNNN.bat` profiles.
 3. Copy the folder to **one** of these options:
-   - inside this project, at `video-downloader\tools\`; or
+   - inside this project, at `streamgrab\tools\`; or
    - add the folder to the Windows PATH.
 4. Run again with `npm run download:curl`.
 
@@ -643,7 +648,7 @@ Press `Ctrl+C` at any time:
 ### Project structure
 
 ```
-video-downloader/
+streamgrab/
   package.json
   config.example.json
   README.md
@@ -651,7 +656,10 @@ video-downloader/
   vendor/ffmpeg/        # local FFmpeg (downloaded automatically by npm install)
   scripts/
     install-ffmpeg.mjs  # downloads/installs FFmpeg into vendor/ffmpeg/ (postinstall)
-  test-curl-e2e.mjs     # E2E suite: generates local HLS (AES-128/fMP4), tests download and mdstrm conversion
+  tests/
+    unit/               # unit tests (node:test)
+    integration/        # integration tests (local servers + FFmpeg)
+    e2e/                # E2E suite: generates local HLS (AES-128/fMP4), direct MP4, DASH and mdstrm
   src/
     index.js      # main flow (CLI)
     ffmpeg.js     # FFmpeg detection and execution (local vendor/ or PATH)
@@ -713,7 +721,7 @@ Una **aplicación CLI en Node.js** para descargar videos reproducidos vía HLS (
 ### Instalación
 
 ```powershell
-cd video-downloader
+cd streamgrab
 npm install
 ```
 
@@ -739,7 +747,7 @@ node src/index.js
 
 ```
 ==============================================
-   Video Downloader — HLS (.m3u8) via FFmpeg
+   StreamGrab — HLS / DASH / YouTube / Social
 ==============================================
 
 Verificando FFmpeg...
@@ -855,7 +863,7 @@ Para CDNs con *fingerprinting TLS* (ítem 3 de arriba), el programa ofrece un mo
 1. Ve a <https://github.com/lexiforest/curl-impersonate/releases> (proyecto original: <https://github.com/lwthiker/curl-impersonate>) y descarga el paquete para Windows (ej.: `curl-impersonate-win64.zip`).
 2. Extrae el ZIP — el formato **v2.x** trae `curl-impersonate.exe` + varios `curl_chromeNNN.bat` / `curl_edgeNNN.bat` / `curl_firefoxNNN.bat`.
 3. Copia la carpeta a **una** de estas opciones:
-   - dentro de este proyecto, en `video-downloader\tools\`; o
+   - dentro de este proyecto, en `streamgrab\tools\`; o
    - agrega la carpeta al PATH de Windows.
 4. Ejecuta de nuevo con `npm run download:curl`.
 
@@ -936,7 +944,7 @@ Pulsa `Ctrl+C` en cualquier momento:
 ### Estructura del proyecto
 
 ```
-video-downloader/
+streamgrab/
   package.json
   config.example.json
   README.md
@@ -944,7 +952,10 @@ video-downloader/
   vendor/ffmpeg/        # FFmpeg local (descargado automáticamente por npm install)
   scripts/
     install-ffmpeg.mjs  # descarga/instala FFmpeg en vendor/ffmpeg/ (postinstall)
-  test-curl-e2e.mjs     # suite E2E: genera HLS local (AES-128/fMP4), prueba descarga y conversión mdstrm
+  tests/
+    unit/               # pruebas unitarias (node:test)
+    integration/        # pruebas de integración (servidores locales + FFmpeg)
+    e2e/                # suite E2E: genera HLS local (AES-128/fMP4), MP4 directo, DASH y mdstrm
   src/
     index.js      # flujo principal (CLI)
     ffmpeg.js     # verificación y ejecución de FFmpeg (local en vendor/ o PATH)

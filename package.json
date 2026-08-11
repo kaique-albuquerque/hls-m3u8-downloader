@@ -1,7 +1,7 @@
 {
-  "name": "video-downloader",
-  "version": "1.0.0",
-  "description": "Downloader de vídeos HLS (.m3u8) com suporte automático à Mídia Stream (mdstrm) via curl-impersonate. Requer apenas Node.js — o FFmpeg é instalado automaticamente.",
+  "name": "streamgrab",
+  "version": "0.1.0",
+  "description": "Universal video downloader for HLS, DASH, YouTube and supported web platforms.",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -9,7 +9,12 @@
     "download:youtube": "node src/index.js --youtube",
     "electron:dev": "electron .",
     "electron:serve": "electron .",
-    "test": "node test-curl-e2e.mjs",
+    "test": "node --experimental-test-module-mocks --test \"tests/unit/*.test.js\" \"tests/integration/*.test.js\" && node tests/e2e/curl-e2e.mjs",
+    "test:unit": "node --experimental-test-module-mocks --test \"tests/unit/*.test.js\"",
+    "test:integration": "node --experimental-test-module-mocks --test \"tests/integration/*.test.js\"",
+    "test:e2e": "node tests/e2e/curl-e2e.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
     "ffmpeg:install": "node scripts/install-ffmpeg.mjs",
     "postinstall": "node scripts/install-ffmpeg.mjs"
   },
@@ -17,20 +22,25 @@
     "node": ">=20"
   },
   "keywords": [
+    "streamgrab",
+    "video",
+    "downloader",
     "hls",
-    "m3u8",
+    "dash",
+    "youtube",
+    "yt-dlp",
     "ffmpeg",
-    "video-downloader",
     "curl-impersonate",
     "mdstrm",
     "mediastream",
-    "cli",
-    "stream"
+    "cli"
   ],
   "license": "MIT",
   "devDependencies": {
     "electron": "^37.2.6",
-    "ntl": "^5.1.0"
+    "eslint": "^10.8.1",
+    "ntl": "^5.1.0",
+    "prettier": "^3.9.6"
   },
   "dependencies": {
     "youtube-dl-exec": "^3.1.12"

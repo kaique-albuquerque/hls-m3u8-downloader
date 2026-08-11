@@ -1,21 +1,25 @@
-import { analyzeYtDlpUrl, prepareYtDlpDownload } from './ytdlp.js';
+import { ytdlpProvider } from '../providers/ytdlp/index.js';
 import { socialLabelForUrl } from '../utils.js';
 
 /**
- * Adaptador fino de redes sociais: Facebook, Instagram, TikTok, X/Twitter,
- * Reddit, Twitch, Vimeo, LinkedIn e outros sites suportados pelo yt-dlp.
+ * Seletor do provider ytdlp para redes sociais (P3): Facebook, Instagram,
+ * TikTok, X/Twitter, Reddit, Twitch, Vimeo, LinkedIn e outros sites cobertos
+ * pelo yt-dlp.
  *
- * Reusa o mesmo motor yt-dlp generico do YouTube. Limitacoes conhecidas:
- * - Conteudo privado/autenticado exige cookies (future: carregar de config.json).
- * - Conteudo protegido por DRM nao pode ser baixado.
- * - Qualidade tipica fica <= 1080p em posts publicos.
+ * Mantém o contrato de adaptador legado para compatibilidade; a detecção/
+ * análise real vive no ProviderRegistry (src/providers/registry.js).
+ *
+ * Limitações conhecidas:
+ * - Conteúdo privado/autenticado exige cookies (future: carregar de config.json).
+ * - Conteúdo protegido por DRM não pode ser baixado.
+ * - Qualidade típica fica <= 1080p em posts públicos.
  */
 export const SOCIAL_ADAPTER = {
   id: 'social',
   label: 'Redes sociais (yt-dlp)',
   supportsQualitySelection: true,
-  analyze: ({ url, headers, auth }) => analyzeYtDlpUrl(url, headers, auth),
-  prepareDownload: (params) => prepareYtDlpDownload(params),
+  analyze: (params) => ytdlpProvider.analyze(params),
+  prepareDownload: (params) => ytdlpProvider.prepareDownload(params),
 };
 
 /** Rotulo legivel usado em mensagens (ex.: "Facebook", "TikTok"). */

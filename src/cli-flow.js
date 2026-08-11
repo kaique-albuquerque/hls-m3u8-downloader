@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { createStreamGrabCore } from './core/index.js';
 import { checkFfmpeg } from './ffmpeg.js';
 import { fetchPlaylist } from './hls.js';
 import { resolveSourceAdapter, resolveSourceAdapterAsync } from './source-adapters.js';
@@ -54,6 +55,13 @@ export async function runCliSession({
   const ctx = createContext(safeIo);
   registerCancel?.(() => onInterrupt(ctx));
 
+  // P2.6 — fachada publica do novo Core (strangler): a analise de fontes
+  // baseadas em adapter (YouTube/redes sociais) passa pelo StreamGrabCore,
+  // mantendo o comportamento observavel da CLI identico. HLS/DASH/direto
+  // continuam nos fluxos tolerantes a falha atuais; os fluxos de download
+  // (turbo/mux/curl) seguem dedicados ate os transports serem migrados.
+  const core = createStreamGrabCore();
+
   if (argv.includes('--help') || argv.includes('-h')) {
     printUsage(safeIo);
     return { code: 0, ok: true };
@@ -105,7 +113,7 @@ export async function runCliSession({
     safeIo.error('\n[ERRO] Nenhuma URL informada.');
     return { code: 1, ok: false };
   }
-  const adapter = forceYouTube && sourceLooksLikeYouTubeWatch(url)
+  let adapter = forceYouTube && sourceLooksLikeYouTubeWatch(url)
     ? resolveSourceAdapter('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
     : await resolveSourceAdapterAsync(url, headers);
   const sourceType = adapter.id;
@@ -130,7 +138,15 @@ export async function runCliSession({
     safeIo.onState?.({ state: 'analyzing' });
     safeIo.log(`\nAnalisando ${describeSourceType(sourceType)}...`);
     try {
-      info = await adapter.analyze({ url, headers, auth });
+      // P2.6 — analise via StreamGrabCore (mesmo adapter e erro cru do yt-dlp;
+      // info normalizado preserva titulo, variants e formatos usados abaixo).
+      const analysis = await core.analyze(url, {
+        headers,
+        auth,
+        forceYouTube: forceYouTube && sourceLooksLikeYouTubeWatch(url),
+      });
+      adapter = analysis.adapter;
+      info = analysis.info;
       safeIo.log(`Video detectado: ${info.title}`);
       if (info.progressiveFormats?.length) {
         safeIo.log(`Formatos progressivos disponiveis: ${info.progressiveFormats.length}`);

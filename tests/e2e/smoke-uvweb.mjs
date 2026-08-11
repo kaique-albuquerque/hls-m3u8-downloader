@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runCliSession } from './src/cli-flow.js';
+import { runCliSession } from '../../src/cli-flow.js';
 
 const URL = 'https://vod-uvweb2.329wu3569v.com/vod/E2B0BFF409244817B50635CD3D303F64_media.mp4?content_auth2=/vod/%3Ftag%3Dslb%26host%3Dvod-uvweb2.329wu3569v.com%26app_id%3Dcom.unitv.webs%26trans_id%3Dc5cm6T6OMm_mVTkwx3J6pY%26app_version%3D10102%26client_ip%3D44.204.195.41%26dev_id%3D579c0f1803a7898dfcd681bc20d149ed%26auth_id%3D564571682_com.unitv.webs__0%26user_id%3D564571682%26expired%3D1786409010%26token%3D6634a2c0c396379d50f4426be94c2856&content_license2=tag%3Dslb%26scheme%3Dslb%26app_id%3Dcom.unitv.webs%26media_code%3DE2B0BFF409244817B50635CD3D303F64%26expired%3D1786409010%26token%3D493cd12ff84926c36e059a9914f1e0ea';
 const EXPECTED_BYTES = 79863964;

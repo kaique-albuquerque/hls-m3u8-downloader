@@ -256,7 +256,7 @@ function addTab() {
     fields.modeLabel.textContent = 'Analise de playlist em andamento';
     fields.log.textContent = [
       '==============================================',
-      'Video Downloader - HLS / DASH / YouTube / Redes sociais',
+      'StreamGrab - HLS / DASH / YouTube / Redes sociais',
       '==============================================',
       '',
       'Verificando FFmpeg...',
@@ -358,7 +358,7 @@ function addTab() {
     setStatus(state, 'Iniciando download...');
     fields.log.textContent = [
       '==============================================',
-      'Video Downloader - HLS / DASH / YouTube / Redes sociais',
+      'StreamGrab - HLS / DASH / YouTube / Redes sociais',
       'via FFmpeg + curl-impersonate (opcional)',
       '==============================================',
       '',

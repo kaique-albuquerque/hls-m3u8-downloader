@@ -1,14 +1,16 @@
-import { analyzeYtDlpUrl, prepareYtDlpDownload } from './ytdlp.js';
+import { ytdlpProvider } from '../providers/ytdlp/index.js';
 
 /**
- * Adaptador fino de YouTube: delega todo o trabalho pesado ao motor yt-dlp
- * generico (src/adapters/ytdlp.js) mantendo o contrato de adaptador esperado
- * pelo CLI/Electron: { id, label, supportsQualitySelection, analyze, prepareDownload }.
+ * Seletor do provider ytdlp para YouTube (P3).
+ *
+ * Mantém o contrato de adaptador legado ({ id, label, supportsQualitySelection,
+ * analyze, prepareDownload }) para compatibilidade; a detecção/analise real
+ * vive no ProviderRegistry (src/providers/registry.js).
  */
 export const YOUTUBE_ADAPTER = {
   id: 'youtube',
   label: 'YouTube (yt-dlp)',
   supportsQualitySelection: true,
-  analyze: ({ url, headers, auth }) => analyzeYtDlpUrl(url, headers, auth),
-  prepareDownload: (params) => prepareYtDlpDownload(params),
+  analyze: (params) => ytdlpProvider.analyze(params),
+  prepareDownload: (params) => ytdlpProvider.prepareDownload(params),
 };

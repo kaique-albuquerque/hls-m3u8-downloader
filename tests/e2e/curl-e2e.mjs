@@ -14,22 +14,24 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parsePlaylistText, parseSegmentPlaylist } from './src/hls.js';
-import { parseDashManifest } from './src/dash.js';
-import { findCurlImpersonate } from './src/curlimp.js';
-import { resolveSourceAdapter } from './src/source-adapters.js';
-import { extractInitialPlayerResponse, parseYouTubePlayerResponse, prepareYouTubeDownload } from './src/legacy/youtube.js';
-import { applyNTransform, applySignatureCipher, decipherYouTubeSignature, extractPlayerJsUrl, transformYouTubeNParam } from './src/legacy/youtube-signature.js';
+import { parsePlaylistText, parseSegmentPlaylist } from '../../src/hls.js';
+import { parseDashManifest } from '../../src/dash.js';
+import { findCurlImpersonate } from '../../src/curlimp.js';
+import { resolveSourceAdapter } from '../../src/source-adapters.js';
+import { extractInitialPlayerResponse, parseYouTubePlayerResponse, prepareYouTubeDownload } from '../../src/legacy/youtube.js';
+import { applyNTransform, applySignatureCipher, decipherYouTubeSignature, extractPlayerJsUrl, transformYouTubeNParam } from '../../src/legacy/youtube-signature.js';
 import {
   extractMdstrmVideoId,
   buildPlayerUrl,
   isMdstrmUrl,
   needsMdstrmRefresh,
-} from './src/mdstrm.js';
-import { detectSourceType, isYouTubeUrl } from './src/utils.js';
+} from '../../src/mdstrm.js';
+import { detectSourceType, isYouTubeUrl } from '../../src/utils.js';
+import { getFfmpegCommand } from '../../src/ffmpeg.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = __dirname;
+// tests/e2e -> raiz do projeto
+const ROOT = path.resolve(__dirname, '..', '..');
 const E2E_DIR = path.join(os.tmpdir(), 'vd-e2e');
 const OUT_DIR = path.join(os.tmpdir(), 'vd-e2e-out');
 const TOOLS_DIR = path.join(ROOT, 'tools');
@@ -43,7 +45,8 @@ function stderrText(result) {
 }
 
 function ffmpegAvailable() {
-  const probe = spawnSync('ffmpeg', ['-version'], { windowsHide: true });
+  // Usa o binario local (vendor/ffmpeg) ou o comando do PATH, igual ao fluxo real.
+  const probe = spawnSync(getFfmpegCommand(), ['-version'], { windowsHide: true });
   return !probe.error && probe.status === 0;
 }
 
@@ -235,7 +238,7 @@ async function runCase({ label, encrypted, fmp4 }) {
   if (encrypted) args.push('-hls_key_info_file', 'keyinfo.txt');
   args.push('-hls_segment_filename', `seg%d.${segExt}`, 'media.m3u8');
 
-  const gen = spawnSync('ffmpeg', args, { cwd: E2E_DIR, windowsHide: true });
+  const gen = spawnSync(getFfmpegCommand(), args, { cwd: E2E_DIR, windowsHide: true });
   ok(gen.status === 0, `gerou HLS (${label}) com FFmpeg (exit ${gen.status})`);
   if (gen.status !== 0) {
     console.log(stderrText(gen).slice(-1500));
@@ -302,7 +305,7 @@ media.m3u8
   const size = fs.existsSync(mp4) ? fs.statSync(mp4).size : 0;
   ok(size > 100000, `[${label}] MP4 gerado (${size} bytes)`);
 
-  const r = spawnSync('ffmpeg', ['-i', mp4, '-f', 'null', '-'], { windowsHide: true });
+  const r = spawnSync(getFfmpegCommand(), ['-i', mp4, '-f', 'null', '-'], { windowsHide: true });
   const stderr = stderrText(r);
   const dur = stderr.match(/Duration:\s*([0-9:.]+)/)?.[1];
   ok(/Duration:\s*00:00:0[4-9]/.test(stderr), `[${label}] MP4 válido (duration ${dur})`);
@@ -325,12 +328,15 @@ async function runDirectCase() {
   fs.mkdirSync(E2E_DIR, { recursive: true });
 
   const mp4Source = path.join(E2E_DIR, 'source.mp4');
-  const gen = spawnSync('ffmpeg', [
+  const gen = spawnSync(getFfmpegCommand(), [
     '-y',
     '-f', 'lavfi', '-i', 'testsrc=duration=4:size=320x240:rate=30',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
     '-c:v', 'libx264', '-preset', 'ultrafast',
     '-c:a', 'aac',
+    // moov no inicio: sem faststart o demuxer do FFmpeg precisa de Range
+    // para localizar o moov no fim, e o servidor local nao suporta Range
+    '-movflags', '+faststart',
     mp4Source,
   ], { windowsHide: true });
   ok(gen.status === 0, `gerou MP4 direto com FFmpeg (exit ${gen.status})`);
@@ -379,7 +385,7 @@ async function runDashCase() {
   fs.rmSync(E2E_DIR, { recursive: true, force: true });
   fs.mkdirSync(E2E_DIR, { recursive: true });
 
-  const gen = spawnSync('ffmpeg', [
+  const gen = spawnSync(getFfmpegCommand(), [
     '-y',
     '-f', 'lavfi', '-i', 'testsrc=duration=4:size=320x240:rate=30',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
@@ -408,7 +414,10 @@ async function runDashCase() {
   const port = server.address().port;
 
   const stdin = `http://127.0.0.1:${port}/manifest.mpd\ndash-test\n${OUT_DIR}\n`;
-  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'index.js')], { cwd: ROOT, windowsHide: true });
+  // cwd = E2E_DIR: o demuxer DASH do FFmpeg grava temp files (init-*.mp4,
+  // seg-*.m4s) no diretorio de trabalho do processo; com cwd=ROOT eles
+  // poluiriam a raiz do repositorio.
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'index.js')], { cwd: E2E_DIR, windowsHide: true });
   child.stdin.end(stdin);
 
   let out = '';

@@ -4,14 +4,14 @@ import { ensureMp4, formatKbps, sanitizeFilename } from '../utils.js';
 
 export function printHeader(io) {
   io.log('==============================================');
-  io.log('   Video Downloader - HLS / DASH / Midia direta');
+  io.log('   StreamGrab - HLS / DASH / Midia direta');
   io.log('   via FFmpeg + curl-impersonate (opcional)');
   io.log('==============================================');
 }
 
 export function printUsage(io) {
   io.log('');
-  io.log('Video Downloader - HLS / DASH / Midia direta via FFmpeg');
+  io.log('StreamGrab - HLS / DASH / Midia direta via FFmpeg');
   io.log('');
   io.log('Uso:');
   io.log('  npm start');

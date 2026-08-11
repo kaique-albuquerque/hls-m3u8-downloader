@@ -27,7 +27,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     backgroundColor: '#0a0f14',
-    title: 'Video Downloader',
+    title: 'StreamGrab',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

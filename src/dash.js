@@ -58,7 +58,7 @@ export function parseDashManifest(text, baseUrl = '') {
   };
 }
 
-export async function fetchDashManifest(url, headers = {}, timeoutMs = 30000) {
+export async function fetchDashManifestText(url, headers = {}, timeoutMs = 30000) {
   const res = await fetch(url, {
     headers,
     redirect: 'follow',
@@ -71,6 +71,10 @@ export async function fetchDashManifest(url, headers = {}, timeoutMs = 30000) {
     throw err;
   }
 
-  const text = await res.text();
-  return parseDashManifest(text, res.url || url);
+  return { text: await res.text(), url: res.url || url };
+}
+
+export async function fetchDashManifest(url, headers = {}, timeoutMs = 30000) {
+  const { text, url: finalUrl } = await fetchDashManifestText(url, headers, timeoutMs);
+  return parseDashManifest(text, finalUrl);
 }

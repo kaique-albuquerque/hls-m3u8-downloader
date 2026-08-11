@@ -1,0 +1,53 @@
+{
+  "id": "abc123",
+  "title": "Vídeo de Teste StreamGrab",
+  "duration": 125,
+  "webpage_url": "https://www.youtube.com/watch?v=abc123",
+  "formats": [
+    {
+      "format_id": "18",
+      "ext": "mp4",
+      "url": "https://example.com/prog.mp4",
+      "vcodec": "avc1.42001E",
+      "acodec": "mp4a.40.2",
+      "format_note": "360p",
+      "width": 640,
+      "height": 360,
+      "tbr": 500.0,
+      "filesize": 1234567
+    },
+    {
+      "format_id": "137",
+      "ext": "mp4",
+      "url": "https://example.com/v137.mp4",
+      "vcodec": "avc1.640028",
+      "acodec": "none",
+      "format_note": "1080p",
+      "width": 1920,
+      "height": 1080,
+      "tbr": 2500.0,
+      "filesize": 4567890
+    },
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "url": "https://example.com/a140.m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "format_note": "m4a",
+      "tbr": 128.0,
+      "filesize": 567890
+    },
+    {
+      "format_id": "247",
+      "ext": "webm",
+      "url": "",
+      "vcodec": "vp9",
+      "acodec": "none",
+      "format_note": "720p",
+      "width": 1280,
+      "height": 720,
+      "tbr": 0
+    }
+  ]
+}

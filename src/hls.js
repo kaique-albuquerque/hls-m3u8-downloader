@@ -88,12 +88,12 @@ export function parsePlaylistText(text, baseUrl = '') {
 }
 
 /**
- * Baixa e interpreta uma playlist HLS.
+ * Busca o texto bruto de uma playlist HLS (sem parse).
  *
- * Retorna o mesmo formato de parsePlaylistText, com baseUrl = URL final
- * (após redirects) para resolução de URIs relativas.
+ * Retorna { text, url } — url é a URL final (após redirects), usada como base
+ * para resolver URIs relativas e para inspeção de DRM antes do parse.
  */
-export async function fetchPlaylist(url, headers = {}, timeoutMs = 30000) {
+export async function fetchPlaylistText(url, headers = {}, timeoutMs = 30000) {
   const res = await fetch(url, {
     headers,
     redirect: 'follow',
@@ -106,8 +106,18 @@ export async function fetchPlaylist(url, headers = {}, timeoutMs = 30000) {
     throw err;
   }
 
-  const text = await res.text();
-  return parsePlaylistText(text, res.url || url);
+  return { text: await res.text(), url: res.url || url };
+}
+
+/**
+ * Baixa e interpreta uma playlist HLS.
+ *
+ * Retorna o mesmo formato de parsePlaylistText, com baseUrl = URL final
+ * (após redirects) para resolução de URIs relativas.
+ */
+export async function fetchPlaylist(url, headers = {}, timeoutMs = 30000) {
+  const { text, url: finalUrl } = await fetchPlaylistText(url, headers, timeoutMs);
+  return parsePlaylistText(text, finalUrl);
 }
 
 /**
