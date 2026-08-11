@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startMuxDownload } from '../ffmpeg.js';
+import { mux } from '../ffmpeg/muxer.js';
 import { formatBytes } from '../utils.js';
 import { downloadParallelRanges, probeRangeSupport } from '../transports/range.js';
 import { createProgressReporter } from './progress.js';
@@ -139,7 +139,7 @@ export async function runTurboMuxedDownloadFlow(ctx, {
 
     ctx.io.log('\nJuntando video e audio com FFmpeg...');
     const progress = createProgressReporter(ctx.io, { durationMs, label: 'Juntando video e audio' });
-    const { promise, stop } = startMuxDownload({
+    const { promise, stop } = mux({
       videoInput: videoTmp,
       audioInput: audioTmp,
       output,

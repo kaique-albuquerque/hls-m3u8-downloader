@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startDownload, startMuxDownload } from '../ffmpeg.js';
+// P5: delega ao muxer (modos copy/adtstoasc/aac) — contrato identico ao legado.
+import { startDownload, startMuxDownload } from '../ffmpeg/muxer.js';
 import { maskUrl } from '../utils.js';
 import { MODE_LABELS } from './context.js';
 import { createProgressReporter } from './progress.js';

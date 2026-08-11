@@ -9,6 +9,23 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 ## [Não publicado]
 
 ### Adicionado
+- **FFmpegService e Áudio (P5):** `src/ffmpeg/` — serviço central de FFmpeg (seções 20/11 do
+  architect.md) com detecção de binário (vendor/ffmpeg ou PATH), execução por spawn com args
+  (nunca string montada), progresso por eventos (`-progress pipe:1` →
+  `onProgress({ key, value })`), cancelamento (stop() gracioso com 'q' + SIGKILL após 6s como
+  último recurso, suporte a AbortSignal incl. pré-abortado) e cleanup de listeners.
+  - `src/ffmpeg/service.js` — `getFfmpegCommand`, `checkFfmpeg` (nunca lança), classe
+    `FfmpegService` com `run({ args, onProgress, signal })` → `{ promise, stop, child }`,
+    stderr limitado a 60000 chars e singleton `ffmpegService`.
+  - `src/ffmpeg/muxer.js` — `MODES`/`MODE_LABELS` (copy / copy-adtstoasc / aac), construtores
+    puros de args (`buildDownloadArgs`, `buildMuxArgs`, `formatHeaders`), `startDownload`/
+    `startMuxDownload` com contrato legado `{ promise, stop, mode }` e aliases `remux`/`mux`.
+  - `src/ffmpeg/audio.js` — `AUDIO_PROFILES` (original/m4a/mp3/opus/flac), `canRemuxToProfile`
+    (regra "só remux vs exige transcode" conforme codec de origem) e `audioProfileToArgs`
+    (ex.: mp3 a partir de aac → `-vn -c:a libmp3lame`; original → `-vn -c:a copy`).
+  - 37 testes novos: 31 unitários (`tests/unit/ffmpeg-audio|muxer|service.test.js`, spawn
+    fake injetado, sem binário) e 6 de integração com FFmpeg real
+    (`tests/integration/ffmpeg-service.test.js`), gated por `checkFfmpeg()`.
 - **Transports básicos + Strategy Selection (P4):** camada de transporte desacoplada da CLI
   (seções 15/16/39/40/41 do architect.md) com seleção de estratégia por tipo de erro e
   rollback via `STREAMGRAB_LEGACY_FLOW=1`.
@@ -112,6 +129,15 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 - Scripts npm: `test`, `test:unit`, `test:integration`, `test:e2e`, `lint`, `format`.
 
 ### Alterado
+- **FFmpeg delegado ao muxer (P5):** `src/ffmpeg.js` virou re-export fino de
+  `src/ffmpeg/{service,muxer,audio}.js` (contrato legado preservado — `checkFfmpeg`,
+  `getFfmpegCommand`, `startDownload`, `startMuxDownload`, `MODES`/`MODE_LABELS`); a constante
+  `INSTALLED_VERSION` (não usada em lugar nenhum) foi removida. `src/cli/download.js` e
+  `src/cli/turbo.js` consomem `startDownload`/`mux` do muxer; `src/cli/context.js` re-exporta
+  `MODE_LABELS` do muxer; `src/cli/curl-flow.js` não foi alterado diretamente (continua
+  delegando a `runDownloadFlow`, que já usa o muxer); `src/core/engine.js` segue intacto,
+  consumindo a fachada. Mock de `tests/unit/cli-flow-core.test.js` atualizado para a nova
+  divisão fachada/muxer.
 - **CLI delegando aos transports (P4):** `src/cli/turbo.js` e `src/cli/curl-flow.js` agora
   consomem `transports/range.js`/`transports/curl.js` (API pública e contrato de erro
   preservados: `no-range`/`interrupted`/`other`, `curl-ausente`/`playlist`/`cancelado`/`sem

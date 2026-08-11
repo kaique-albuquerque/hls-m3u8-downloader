@@ -21,6 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 const OUT_DIR = path.join(os.tmpdir(), 'vd-cli-core-test');
 const FFMPEG_URL = pathToFileURL(path.join(ROOT, 'src', 'ffmpeg.js')).href;
+const MUXER_URL = pathToFileURL(path.join(ROOT, 'src', 'ffmpeg', 'muxer.js')).href;
 
 let fakeYtDlpImpl = null;
 mock.module('youtube-dl-exec', {
@@ -33,22 +34,40 @@ const fakeCalls = { analyzeArgs: null, startDownload: 0, startMuxDownload: 0 };
 // NOTA: startDownload/startMuxDownload sao consumidos sincronamente pela CLI
 // (`const { promise, stop } = startDownload(...)`), entao o mock NAO pode ser
 // async (async devolveria uma Promise em vez do objeto { promise, stop }).
+// P5: a CLI delega ao muxer (src/ffmpeg/muxer.js) — cli/download.js importa do
+// muxer; core/engine.js ainda importa da fachada src/ffmpeg.js. Por isso o
+// mock da fachada expoe checkFfmpeg/getFfmpegCommand + startDownload/
+// startMuxDownload, e o mock do muxer expoe startDownload/startMuxDownload.
+function fakeStartDownload({ output }) {
+  fakeCalls.startDownload++;
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, 'fake-mp4');
+  return { promise: Promise.resolve({ ok: true }), stop: () => {} };
+}
+function fakeStartMuxDownload({ output }) {
+  fakeCalls.startMuxDownload++;
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, 'fake-muxed-mp4');
+  return { promise: Promise.resolve({ ok: true }), stop: () => {} };
+}
 mock.module(FFMPEG_URL, {
   namedExports: {
     checkFfmpeg: () => Promise.resolve(true),
     getFfmpegCommand: () => 'ffmpeg',
-    startDownload: ({ output }) => {
-      fakeCalls.startDownload++;
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.writeFileSync(output, 'fake-mp4');
-      return { promise: Promise.resolve({ ok: true }), stop: () => {} };
-    },
-    startMuxDownload: ({ output }) => {
-      fakeCalls.startMuxDownload++;
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.writeFileSync(output, 'fake-muxed-mp4');
-      return { promise: Promise.resolve({ ok: true }), stop: () => {} };
-    },
+    startDownload: fakeStartDownload,
+    startMuxDownload: fakeStartMuxDownload,
+  },
+});
+mock.module(MUXER_URL, {
+  namedExports: {
+    MODE_LABELS: [
+      'copia direta (-c copy)',
+      'copia direta com correcao de audio (aac_adtstoasc)',
+      'reconversao do audio para AAC (-c:a aac)',
+    ],
+    startDownload: fakeStartDownload,
+    startMuxDownload: fakeStartMuxDownload,
+    mux: fakeStartMuxDownload,
   },
 });
 

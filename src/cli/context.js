@@ -1,11 +1,8 @@
 import { killAllCurl } from '../curlimp.js';
 
-/** Modos de extração do FFmpeg (fallbacks de compatibilidade). */
-export const MODE_LABELS = [
-  'copia direta (-c copy)',
-  'copia direta com correcao de audio (aac_adtstoasc)',
-  'reconversao do audio para AAC (-c:a aac)',
-];
+// P5: MODE_LABELS agora pertence ao muxer (src/ffmpeg/muxer.js) — re-export
+// para manter a API publica deste modulo (consumido por cli-flow.js).
+export { MODE_LABELS } from '../ffmpeg/muxer.js';
 
 export function sourceLooksLikeYouTubeWatch(url) {
   try {
