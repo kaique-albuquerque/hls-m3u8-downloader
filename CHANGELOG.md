@@ -9,6 +9,35 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 ## [Não publicado]
 
 ### Adicionado
+- **Transports básicos + Strategy Selection (P4):** camada de transporte desacoplada da CLI
+  (seções 15/16/39/40/41 do architect.md) com seleção de estratégia por tipo de erro e
+  rollback via `STREAMGRAB_LEGACY_FLOW=1`.
+  - `src/transports/http.js` — `downloadUrl` com fetch nativo (stream → arquivo), limites de
+    velocidade/bytes, timeout e cancelamento via `AbortSignal`; `isNotMediaResponse`/sniff de
+    HTML no lugar de mídia (`NOT_MEDIA`), `isAuthError` (`AUTHENTICATION_ERROR`/`FORBIDDEN_ERROR`),
+    `extForUri` e `probeUrl` com redirecionamento seguido.
+  - `src/transports/range.js` — `probeRangeSupport` (valida `Accept-Ranges`/`Content-Range`;
+    servidor sem Range → `RANGE_UNSUPPORTED`) e `downloadParallelRanges` com chunking paralelo,
+    concorrência limitada (Semaphore do core), retomada de chunk parcial e validação de
+    `INVALID_CONTENT_RANGE`; erros de rede/429/5xx retryáveis, 403/HTML terminais.
+  - `src/transports/curl.js` — `CurlImpersonateTransport` (client injetável + fallback de
+    fluxo legado via `rewritePlaylist`/`extForUri` re-exportadas) com `resolve`/`client`/
+    `getText`/`downloadSegments` para HLS via curl-impersonate.
+  - `src/transports/ytdlp-runner.js` — `runYtDlpDownload` para rodar yt-dlp somente quando é a
+    opção correta da fonte: format/output/noPlaylist/cookies/user-agent, progresso por callback
+    e cancelamento real via `Promise.race` + `SIGKILL` do child (`CancelledError`).
+  - `src/core/strategy.js` — `TERMINAL_CODES` (403/401/DRM/URL expirada/mídia ausente/HTML/
+    cancelamento/disco/permissão/formato → **nunca** loop de transports), `selectStrategy`,
+    `resolveFallback`/`canFallback` (fallback ≠ bypass) e `isTerminalError`.
+  - `src/core/retry.js` — `retryWithBackoff` com backoff exponencial + jitter 50-100%,
+    teto `maxDelayMs`, `Retry-After` (segundos e data HTTP), `parseRetryAfter` e `sleep`
+    cancelável via signal.
+  - `src/core/resources.js` — `ResourceManager`/`Semaphore`/`createDefaultResourceManager`
+    (limite de conexões paralelas com cancelamento seguro por signal e liberação correta de
+    listeners de abort).
+  - 80 testes unitários novos (`tests/unit/core-retry|strategy|resources` e
+    `tests/unit/transports-http|range|curl|ytdlp-runner`) com servidores HTTP locais
+    (com/sem Range, 403, 429, HTML no lugar de mídia) e `mock.module` para yt-dlp.
 - **ProviderRegistry + Providers normalizados (P3):** `src/providers/*` — contrato de
   Provider (`{ id, label, priority, detect, analyze, getFormats, prepareDownload }`),
   registro por prioridade (`ProviderRegistry.detect/detectAsync/get/list`) com probe de
@@ -83,6 +112,17 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 - Scripts npm: `test`, `test:unit`, `test:integration`, `test:e2e`, `lint`, `format`.
 
 ### Alterado
+- **CLI delegando aos transports (P4):** `src/cli/turbo.js` e `src/cli/curl-flow.js` agora
+  consomem `transports/range.js`/`transports/curl.js` (API pública e contrato de erro
+  preservados: `no-range`/`interrupted`/`other`, `curl-ausente`/`playlist`/`cancelado`/`sem
+  segmentos`/`chave`/`init`/`segmentos`; flags `turboAbort`/`curlimpActive` intactas), e
+  `src/cli/context.js` expõe `currentHttpAbort` para interromper downloads HTTP ativos no
+  Ctrl+C. `src/core/index.js` re-exporta `STRATEGIES`/`selectStrategy`/`resolveFallback`/
+  `canFallback`/`isTerminalError`, `retryWithBackoff`/`computeBackoffDelay`/`parseRetryAfter`/
+  `retryAfterFromError`/`sleep` e `ResourceManager`/`Semaphore`/`createDefaultResourceManager`.
+  `src/cli/download.js` permanece intacto (FFmpeg é domínio da P5). Rollback da P4 em
+  `src/cli-flow.js`: com `STREAMGRAB_LEGACY_FLOW=1` a CLI desativa turbo e curl-impersonate
+  (transports novos) e usa somente os fluxos legados de `cli/download.js`.
 - **Detecção de fonte delegada ao ProviderRegistry (P3):** `src/source-adapters.js` virou
   fachada fina sobre `src/providers/registry.js` — resolução por prioridade (yt-dlp > HLS >
   DASH > direto) + probe de Content-Type mantido; URLs de domínios mdstrm passam a ser

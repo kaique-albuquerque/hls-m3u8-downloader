@@ -58,31 +58,41 @@ export async function runYtDlpDownload({ url, formatId, output, headers = {}, au
     throw toYtDlpError(err);
   }
 
+  let rejectAbort = null;
+  const abortPromise = new Promise((_, reject) => {
+    rejectAbort = reject;
+  });
   const onAbort = () => {
     try {
       promise?.child?.kill?.('SIGKILL');
     } catch {
       /* ignora */
     }
+    rejectAbort?.(new CancelledError('Operacao cancelada.'));
   };
   if (signal) {
     if (signal.aborted) {
-      onAbort();
+      try {
+        promise?.child?.kill?.('SIGKILL');
+      } catch {
+        /* ignora */
+      }
       throw new CancelledError('Operacao cancelada.');
     }
     signal.addEventListener('abort', onAbort, { once: true });
   }
 
   try {
-    const result = await promise;
+    const result = await Promise.race([promise, abortPromise]);
     if (signal?.aborted) throw new CancelledError('Operacao cancelada.');
     onProgress?.({ bytesDownloaded: 0, totalBytes: 0, percent: 100, message: 'Download concluido via yt-dlp.' });
     return { ok: true, ...(result && typeof result === 'object' ? result : {}) };
   } catch (err) {
-    if (signal?.aborted) throw new CancelledError('Operacao cancelada.');
+    if (signal?.aborted || err?.code === 'CANCELLED') throw new CancelledError('Operacao cancelada.');
     throw toYtDlpError(err);
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    rejectAbort = null;
   }
 }
 

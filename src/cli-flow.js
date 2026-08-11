@@ -74,6 +74,15 @@ export async function runCliSession({
   const config = loadConfig(projectRoot, safeIo);
   let headers = normalizeHeaders({ ...config.headers, ...parseCliHeaders(argv) });
 
+  // Rollback da P4 (transports): com STREAMGRAB_LEGACY_FLOW=1 a CLI volta aos
+  // fluxos antigos — desativa turbo (transports/range) e curl-impersonate
+  // (transports/curl) e usa somente os fluxos legados de cli/download.js.
+  const legacyFlow = process.env.STREAMGRAB_LEGACY_FLOW === '1';
+  if (legacyFlow) {
+    useCurlFlag = false;
+    safeIo.log('[legacy] STREAMGRAB_LEGACY_FLOW=1 — usando fluxos de download legados.');
+  }
+
   // Autenticacao do yt-dlp: flag de CLI tem prioridade sobre config.json.
   const cliAuth = parseCliAuth(argv);
   const auth = {
@@ -84,7 +93,7 @@ export async function runCliSession({
   if (auth.cookiesFromBrowser) safeIo.log(`[auth] Usando cookies do navegador: ${auth.cookiesFromBrowser}`);
 
   // Modo turbo (download paralelo por partes): flag de CLI tem prioridade sobre config.json.
-  const turboEnabled = argv.includes('--turbo') ? true : config.turbo === true;
+  const turboEnabled = !legacyFlow && (argv.includes('--turbo') ? true : config.turbo === true);
   let turboChunks = DEFAULT_TURBO_CHUNKS;
   const chunksIdx = argv.indexOf('--chunks');
   if (chunksIdx !== -1 && Number(argv[chunksIdx + 1]) > 0) turboChunks = Number(argv[chunksIdx + 1]);
@@ -183,8 +192,12 @@ export async function runCliSession({
           .trim()
           .toUpperCase();
         if (ans.startsWith('N')) return { code: 1, ok: false };
-        useCurlFlag = true;
-        safeIo.log('\nAtivando o modo curl-impersonate...');
+        if (!legacyFlow) {
+          useCurlFlag = true;
+          safeIo.log('\nAtivando o modo curl-impersonate...');
+        } else {
+          safeIo.log('[legacy] Modo curl-impersonate desativado pelo rollback STREAMGRAB_LEGACY_FLOW.');
+        }
       } else {
         safeIo.log(`[AVISO] Nao foi possivel analisar a playlist (${err.message}).`);
         safeIo.log('O download tentara usar a URL fornecida diretamente.');

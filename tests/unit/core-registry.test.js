@@ -201,7 +201,10 @@ test('core-registry: cancel durante download interrompe, limpa parcial e emite c
   const executor = createFakeExecutor({
     async run({ signal, output }) {
       await fs.promises.writeFile(output, 'parcial');
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return { cancelled: true };
     },
   });
@@ -231,7 +234,10 @@ test('core-registry: pause/resume retoma o mesmo job e reexecuta o download', as
       attempts += 1;
       onProgress({ bytesDownloaded: 50, totalBytes: 1000, percent: 5 });
       if (attempts === 1) {
-        await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+        await new Promise((resolve) => {
+          if (signal?.aborted) return resolve();
+          signal?.addEventListener('abort', resolve, { once: true });
+        });
         return { paused: true };
       }
       await fs.promises.writeFile(output, 'final');
@@ -268,7 +274,10 @@ test('core-registry: cancel de job pausado acorda o loop e finaliza', async () =
   const executor = createFakeExecutor({
     async run({ signal }) {
       attempts += 1;
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return attempts === 1 ? { paused: true } : { cancelled: true };
     },
   });
@@ -325,7 +334,10 @@ test('core-registry: download em job finalizado/em andamento lanca erro claro', 
 
   const executor = createFakeExecutor({
     async run({ signal }) {
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return { cancelled: true };
     },
   });
@@ -358,7 +370,10 @@ test('core-registry: dispose cancela downloads ativos', async () => {
   const tmp = makeTempDir();
   const executor = createFakeExecutor({
     async run({ signal }) {
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return { cancelled: true };
     },
   });

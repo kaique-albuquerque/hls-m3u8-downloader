@@ -112,8 +112,8 @@ test('resolveFallback: 401/Auth, DRM, URL expirada, not-media, disco, permissao 
     new ExpiredUrlError('expirada'),
     new MediaNotFoundError('404'),
     new StreamGrabError('html no lugar de midia', { code: 'NOT_MEDIA' }),
-    new DiskSpaceError('ENOSPC', { code: 'ENOSPC' }),
-    new PermissionError('EACCES', { code: 'EACCES' }),
+    new DiskSpaceError('disco cheio'),
+    new PermissionError('sem permissao'),
     new CancelledError('cancelado'),
   ];
   for (const err of cases) {

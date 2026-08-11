@@ -143,7 +143,10 @@ test('core-engine: cancelamento interrompe, limpa parcial e emite cancel', async
   const executor = createFakeExecutor({
     async run({ signal, output }) {
       await fs.promises.writeFile(output, 'parcial');
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return { cancelled: true };
     },
   });
@@ -238,7 +241,10 @@ test('core-engine: pause/resume reexecuta o download e emite pause/resume', asyn
       attempts += 1;
       onProgress({ bytesDownloaded: 50, totalBytes: 1000, percent: 5 });
       if (attempts === 1) {
-        await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+        await new Promise((resolve) => {
+          if (signal?.aborted) return resolve();
+          signal?.addEventListener('abort', resolve, { once: true });
+        });
         return { paused: true };
       }
       await fs.promises.writeFile(output, 'final');
@@ -286,7 +292,10 @@ test('core-engine: cancel de job pausado acorda o loop e finaliza', async () => 
   const executor = createFakeExecutor({
     async run({ signal }) {
       attempts += 1;
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return attempts === 1 ? { paused: true } : { cancelled: true };
     },
   });
@@ -305,7 +314,10 @@ test('core-engine: run em job em andamento lanca JOB_ALREADY_RUNNING e controles
   const tmp = makeTempDir();
   const executor = createFakeExecutor({
     async run({ signal }) {
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return { cancelled: true };
     },
   });
@@ -373,7 +385,10 @@ test('core-engine: dispose cancela downloads ativos', async () => {
   const executor = createFakeExecutor({
     async run({ signal, output }) {
       await fs.promises.writeFile(output, 'parcial');
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+        signal?.addEventListener('abort', resolve, { once: true });
+      });
       return { cancelled: true };
     },
   });

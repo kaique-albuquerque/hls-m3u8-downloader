@@ -18,7 +18,7 @@ import {
   retryWithBackoff,
   sleep,
 } from '../../src/core/retry.js';
-import { NetworkError, ForbiddenError, CancelledError, RateLimitError, StreamGrabError } from '../../src/core/errors.js';
+import { NetworkError, ForbiddenError, RateLimitError, StreamGrabError } from '../../src/core/errors.js';
 
 test('computeBackoffDelay: dobra a cada tentativa com fator 2', () => {
   assert.equal(computeBackoffDelay(0, { baseDelayMs: 500, jitter: false }), 500);
