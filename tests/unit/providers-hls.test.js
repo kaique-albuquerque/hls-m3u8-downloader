@@ -8,6 +8,7 @@ import http from 'node:http';
 import { hlsProvider } from '../../src/providers/hls/index.js';
 import { checkHlsDrm } from '../../src/providers/hls/drm.js';
 import { UnsupportedDrmError } from '../../src/core/errors.js';
+import { DEFAULT_USER_AGENT } from '../../src/utils.js';
 
 // ---- checkHlsDrm ----
 test('hls drm: playlists sem DRM passam', () => {
@@ -197,6 +198,27 @@ test('hls provider: analyze media playlist -> kind media', async () => {
   }, async (base) => hlsProvider.analyze({ url: `${base}/media.m3u8` }));
   assert.equal(result.kind, 'media');
   assert.equal(result.sourceType, 'hls');
+});
+
+test('hls provider: analyze envia User-Agent padrao no fetch', async () => {
+  let seenUA = null;
+  const result = await withServer((req, res) => {
+    seenUA = req.headers['user-agent'];
+    res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
+    res.end(MASTER_PLAYLIST);
+  }, async (base) => hlsProvider.analyze({ url: `${base}/master.m3u8` }));
+  assert.equal(result.kind, 'master');
+  assert.equal(seenUA, DEFAULT_USER_AGENT);
+});
+
+test('hls provider: prepareDownload usa selectedUrl quando presente', async () => {
+  const master = `${MASTER_PLAYLIST}`;
+  const withSel = await hlsProvider.prepareDownload({ url: 'master.m3u8', selectedUrl: '720p.m3u8' });
+  assert.equal(withSel.downloadUrl, '720p.m3u8');
+
+  const withoutSel = await hlsProvider.prepareDownload({ url: 'media.m3u8' });
+  assert.equal(withoutSel.downloadUrl, 'media.m3u8');
+  assert.ok(master); // apenas para referenciar a constante
 });
 
 test('hls provider: analyze com DRM lanca UnsupportedDrmError', async () => {

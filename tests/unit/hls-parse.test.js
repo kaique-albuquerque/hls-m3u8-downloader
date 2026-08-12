@@ -10,7 +10,9 @@ import {
   parsePlaylistText,
   parseSegmentPlaylist,
   fetchPlaylist,
+  fetchPlaylistText,
 } from '../../src/hls.js';
+import { DEFAULT_USER_AGENT } from '../../src/utils.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'hls');
 
@@ -144,4 +146,21 @@ test('hls fetchPlaylist: 404 lanca Error com status', async () => {
       return true;
     }
   );
+});
+
+test('hls fetchPlaylistText: envia User-Agent padrao (403 de CDN sem UA nao acontece)', async () => {
+  let seenUA = null;
+  await withServer((req, res) => {
+    seenUA = req.headers['user-agent'];
+    res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
+    res.end(fixture('media.m3u8'));
+  }, async (base) => {
+    await fetchPlaylistText(`${base}/media.m3u8`);
+    assert.equal(seenUA, DEFAULT_USER_AGENT, 'UA padrao presente no request');
+
+    // Header do usuario vence o default.
+    const custom = 'MyCustomUA/1.0';
+    await fetchPlaylistText(`${base}/media.m3u8`, { 'User-Agent': custom });
+    assert.equal(seenUA, custom, 'UA customizado vence o default');
+  });
 });

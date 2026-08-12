@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
 
-import { parseDashManifest, fetchDashManifest } from '../../src/dash.js';
+import { parseDashManifest, fetchDashManifest, fetchDashManifestText } from '../../src/dash.js';
+import { DEFAULT_USER_AGENT } from '../../src/utils.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'dash');
 
@@ -92,4 +93,16 @@ test('dash fetchDashManifest: 403 lanca Error com status', async () => {
       return true;
     }
   );
+});
+
+test('dash fetchDashManifestText: envia User-Agent padrao no request', async () => {
+  let seenUA = null;
+  await withServer((req, res) => {
+    seenUA = req.headers['user-agent'];
+    res.writeHead(200, { 'content-type': 'application/dash+xml' });
+    res.end(fixture('manifest.mpd'));
+  }, async (base) => {
+    await fetchDashManifestText(`${base}/manifest.mpd`);
+    assert.equal(seenUA, DEFAULT_USER_AGENT, 'UA padrao presente no request');
+  });
 });

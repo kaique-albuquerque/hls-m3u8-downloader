@@ -202,7 +202,7 @@ function addTab({ copyFrom } = {}) {
         fields.modeLabel.textContent = 'Falha na analise';
         return;
       }
-      state.sourceUrl = url;
+      state.sourceUrl = info.workingUrl || url;
       state.analysisBaseUrl = info.baseUrl || info.media?.baseUrl || url;
       state.media = info.media || null;
       renderMediaInfo(state);

@@ -160,6 +160,11 @@ async function analyzePlaylist(rawPayload) {
   const config = loadConfig(PROJECT_ROOT, { log: () => {} });
   const mergedHeaders = normalizeHeaders({ ...config.headers, ...headers });
 
+  // URL efetivamente usada na analise (mdstrm converte a URL crua do CDN para
+  // a URL do player). Devolvida ao renderer para que a fila re-analise/baixe
+  // a MESMA URL que funcionou — a crua da 403 para qualquer cliente.
+  let workingUrl = url;
+
   const adapter = await resolveSourceAdapterAsync(url, mergedHeaders);
   let analysis;
   if (adapter.id === 'direct') {
@@ -175,7 +180,6 @@ async function analyzePlaylist(rawPayload) {
   } else if (adapter.id === 'unknown') {
     analysis = await adapter.analyze({ url, headers: mergedHeaders });
   } else {
-    let workingUrl = url;
     const found = findCurlImpersonate();
 
     // mdstrm: URL crua do CDN (tokens presos à sessão do player) dá 403 para
@@ -212,7 +216,7 @@ async function analyzePlaylist(rawPayload) {
     sourceType: adapter.id === 'youtube' ? 'youtube' : adapter.id === 'social' ? 'social' : analysis.sourceType || adapter.id,
     provider: adapter.label || adapter.id,
   });
-  return { ...analysis, media };
+  return { ...analysis, media, workingUrl };
 }
 
 ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {

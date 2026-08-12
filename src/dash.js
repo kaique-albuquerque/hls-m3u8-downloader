@@ -1,3 +1,5 @@
+import { normalizeHeaders, DEFAULT_USER_AGENT } from './utils.js';
+
 function stripTag(value) {
   return String(value || '').replace(/<[^>]+>/g, '').trim();
 }
@@ -59,8 +61,10 @@ export function parseDashManifest(text, baseUrl = '') {
 }
 
 export async function fetchDashManifestText(url, headers = {}, timeoutMs = 30000) {
+  // P11.1: mesmo padrao do fetch HLS — UA default para evitar 403 de CDN/WAF.
+  const requestHeaders = normalizeHeaders({ 'User-Agent': DEFAULT_USER_AGENT, ...headers });
   const res = await fetch(url, {
-    headers,
+    headers: requestHeaders,
     redirect: 'follow',
     signal: AbortSignal.timeout(timeoutMs),
   });

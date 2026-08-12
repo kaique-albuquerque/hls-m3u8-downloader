@@ -36,6 +36,9 @@ import { estimateMuxSpace } from './disk.js';
 import { getDefaultDownloadsDir, normalizeHeaders, DEFAULT_USER_AGENT } from '../utils.js';
 import { resolveSourceAdapter, resolveSourceAdapterAsync } from '../source-adapters.js';
 import { startDownload, startMuxDownload } from '../ffmpeg.js';
+import { CurlImpersonateTransport } from '../transports/curl.js';
+import { isMdstrmUrl } from '../mdstrm.js';
+import { parsePlaylistText } from '../hls.js';
 
 const FALLBACK_TITLE = 'video';
 
@@ -83,6 +86,14 @@ export function createDefaultExecutor() {
         return { ok: false, code: 'DOWNLOAD_FAILED', error: 'Nenhuma URL de download preparada.' };
       }
       if (sourceType === 'hls' || sourceType === 'dash') {
+        // mdstrm: o CDN exige TLS de navegador (JA3/JA4) — o FFmpeg direto leva
+        // 403 mesmo com tokens validos. Mesmo fluxo do CLI que funciona:
+        // curl-impersonate para playlists/segmentos + mux local com FFmpeg.
+        if (isMdstrmUrl(url) || isMdstrmUrl(job.url)) {
+          const curlResult = await runCurlHlsDownload(url, output, headers, signal, onProgress);
+          if (curlResult) return curlResult;
+          // sem curl-impersonate instalado — tenta FFmpeg direto (legado)
+        }
         return runFfmpegDownload(url, output, headers, signal, onProgress, sourceType, mode, Number(job.meta?.durationMs || 0));
       }
       return runStreamDownload(url, output, headers, signal, onProgress, atomic);

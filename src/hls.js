@@ -1,3 +1,5 @@
+import { normalizeHeaders, DEFAULT_USER_AGENT } from './utils.js';
+
 const STREAM_INF_RE = /^#EXT-X-STREAM-INF:(.*)$/;
 
 /**
@@ -94,8 +96,12 @@ export function parsePlaylistText(text, baseUrl = '') {
  * para resolver URIs relativas e para inspeção de DRM antes do parse.
  */
 export async function fetchPlaylistText(url, headers = {}, timeoutMs = 30000) {
+  // P11.1: o fetch do Node nao envia User-Agent por padrao; varios CDNs/WAFs
+  // rejeitam com 403 requisicoes sem UA (o CLI funciona porque o FFmpeg
+  // sempre envia um). Header do usuario vence o default.
+  const requestHeaders = normalizeHeaders({ 'User-Agent': DEFAULT_USER_AGENT, ...headers });
   const res = await fetch(url, {
-    headers,
+    headers: requestHeaders,
     redirect: 'follow',
     signal: AbortSignal.timeout(timeoutMs),
   });

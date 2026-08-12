@@ -70,8 +70,12 @@ export const hlsProvider = {
     );
   },
 
-  /** O download HLS segue pelo mecanismo atual (FFmpeg recebe a URL). */
-  async prepareDownload({ url }) {
-    return { downloadUrl: url };
+  /**
+   * O download HLS segue pelo mecanismo atual (FFmpeg recebe a URL).
+   * Quando a UI ja escolheu uma variante (selectedUrl absoluta), baixa a
+   * variante escolhida; caso contrario, a URL original (master/media).
+   */
+  async prepareDownload({ url, selectedUrl }) {
+    return { downloadUrl: selectedUrl || url };
   },
 };
