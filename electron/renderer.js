@@ -412,8 +412,9 @@ async function enqueueForTab(state, { lockNow }) {
 
   if (!result || !result.ok) {
     activeOutputs.delete(fullOutput);
-    setStatus(state, `Nao foi possivel enfileirar: ${result?.error || 'erro desconhecido'}`);
-    appendLog(state, `ERRO ao enfileirar: ${result?.error || 'erro desconhecido'}`);
+    const errorText = formatUiError(result?.error);
+    setStatus(state, `Nao foi possivel enfileirar: ${errorText}`);
+    appendLog(state, `ERRO ao enfileirar: ${errorText}`);
     return;
   }
 
@@ -488,6 +489,13 @@ function renderQualities(state, emptyLabel = 'Nenhuma URL analisada ainda.') {
 
 function setStatus(state, text) {
   state.fields.status.textContent = text;
+}
+
+function formatUiError(error) {
+  if (!error) return 'erro desconhecido';
+  if (typeof error === 'string') return error;
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message.trim();
+  return String(error);
 }
 
 function appendLog(tab, line) {

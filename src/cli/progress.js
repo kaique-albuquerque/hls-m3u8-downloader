@@ -79,9 +79,10 @@ export function createProgressReporter(io, { totalBytes = 0, durationMs = 0, lab
         }
       }
     },
-    finish() {
+    finish(success = true) {
       if (cliMode) {
-        process.stdout.write(`\r${' '.repeat(Math.max(0, lastFrame.length))}\r${label} concluido.\n`);
+        const statusLabel = success ? `${label} concluido.` : `${label} falhou.`;
+        process.stdout.write(`\r${' '.repeat(Math.max(0, lastFrame.length))}\r${statusLabel}\n`);
         lastFrame = '';
       }
       io.onProgressEnd?.();

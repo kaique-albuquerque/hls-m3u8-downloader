@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   isSafeHttpUrl,
+  isSafeMediaSelection,
   isValidTaskId,
   sanitizeDownloadFilename,
   isAbsolutePath,
@@ -42,6 +43,18 @@ test('isSafeHttpUrl rejeita protocolos perigosos e não-URLs', () => {
   assert.equal(isSafeHttpUrl(null), false);
   assert.equal(isSafeHttpUrl(undefined), false);
   assert.equal(isSafeHttpUrl(123), false);
+});
+
+test('isSafeMediaSelection aceita URL segura e seletor interno do yt-dlp', () => {
+  assert.equal(isSafeMediaSelection('https://example.com/video.mp4'), true);
+  assert.equal(isSafeMediaSelection('ytdlp-format:137'), true);
+  assert.equal(isSafeMediaSelection('ytdlp-format:248.webm'), true);
+});
+
+test('isSafeMediaSelection rejeita seletores perigosos', () => {
+  assert.equal(isSafeMediaSelection('javascript:alert(1)'), false);
+  assert.equal(isSafeMediaSelection('file:///etc/passwd'), false);
+  assert.equal(isSafeMediaSelection('ytdlp-format:'), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -285,6 +298,16 @@ test('validateQueueEnqueuePayload aceita payload de fila válido (filename opcio
   assert.equal(out.qualityChoice, '2');
 });
 
+test('validateQueueEnqueuePayload aceita selectedUrl interna do yt-dlp', () => {
+  const out = validateQueueEnqueuePayload({
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    selectedUrl: 'ytdlp-format:137',
+    title: 'Video',
+  });
+  assert.ok(out);
+  assert.equal(out.selectedUrl, 'ytdlp-format:137');
+});
+
 test('validateQueueEnqueuePayload normaliza campos opcionais e valida segurança', () => {
   // filename opcional agora (o engine usa meta.filename OU o título da análise)
   const out = validateQueueEnqueuePayload({ url: 'https://example.com/v.mp4' });
@@ -336,6 +359,17 @@ test('validateDownloadPayload agora aceita selectedUrl e title', () => {
     }),
     null
   );
+});
+
+test('validateDownloadPayload aceita selectedUrl interna do yt-dlp', () => {
+  const out = validateDownloadPayload({
+    taskId: 'tab-1',
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    filename: 'video',
+    selectedUrl: 'ytdlp-format:137',
+  });
+  assert.ok(out);
+  assert.equal(out.selectedUrl, 'ytdlp-format:137');
 });
 
 test('validateSettingsPayload aceita somente chaves conhecidas e valida defaultDir', () => {

@@ -13,6 +13,7 @@
  * duplicada aqui — tudo delega para o FfmpegService.
  */
 
+import { DEFAULT_USER_AGENT, normalizeHeaders } from '../utils.js';
 import { FfmpegService, ffmpegService } from './service.js';
 
 /** Modos de extração do FFmpeg (fallbacks de compatibilidade). */
@@ -47,9 +48,12 @@ export function formatHeaders(headers) {
  */
 export function buildDownloadArgs({ url, output, headers = {}, modeIndex = 0, extraArgs = [], outputArgs = [] }) {
   const mode = MODES[modeIndex] || MODES[0];
-  const headerStr = formatHeaders(headers);
+  const isRemoteInput = /^https?:\/\//i.test(String(url || ''));
+  const effectiveHeaders = normalizeHeaders(headers);
+  if (isRemoteInput && !effectiveHeaders['User-Agent']) effectiveHeaders['User-Agent'] = DEFAULT_USER_AGENT;
+  const headerStr = formatHeaders(effectiveHeaders);
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-y'];
-  if (headerStr) args.push('-headers', headerStr);
+  if (isRemoteInput && headerStr) args.push('-headers', headerStr);
   args.push(...extraArgs, '-i', url, '-progress', 'pipe:1', ...outputArgs, ...mode.args, output);
   return args;
 }

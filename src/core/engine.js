@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { installCurlImpersonate } from '../curlimp-install.js';
 import { createEventBus, createProgressPayload } from './events.js';
 import {
   createDownloadJob,
@@ -143,10 +144,33 @@ export function createDefaultExecutor() {
           // no _runJob). curl-impersonate é usado quando instalado (CDNs que
           // tambem bloqueiam por TLS de navegador); caso contrario, o FFmpeg
           // direto com a variante fresca (fluxo padrao do CLI sem --curl).
-          const transport = CurlImpersonateTransport.resolve({ headers });
+          let transport = CurlImpersonateTransport.resolve({ headers });
+          if (!transport) {
+            onLog('[mdstrm/roteamento] curl-impersonate ausente — tentando instalacao automatica');
+            try {
+              await installCurlImpersonate({
+                projectRoot: process.cwd(),
+                io: { log: (message) => onLog(message) },
+              });
+            } catch (err) {
+              onLog(`[mdstrm/roteamento] instalacao automatica falhou: ${err.message}`);
+            }
+            transport = CurlImpersonateTransport.resolve({ headers });
+          }
           onLog(`[mdstrm/roteamento] transporte curl-impersonate disponivel=${Boolean(transport)}`);
           if (transport) {
-            const curlResult = await runCurlHlsDownload(url, output, headers, signal, onProgress, transport, onLog);
+            const preferredVariantPath = safePathname(url);
+            const curlEntryUrl = isMdstrmUrl(job.url) || isMdstrmPlayerUrl(job.url) ? job.url : url;
+            const curlResult = await runCurlHlsDownload(
+              curlEntryUrl,
+              output,
+              headers,
+              signal,
+              onProgress,
+              transport,
+              onLog,
+              { preferredVariantPath }
+            );
             if (curlResult) return curlResult;
             onLog('[mdstrm/roteamento] curl retornou null — fallback inesperado para FFmpeg');
           } else {
@@ -172,6 +196,16 @@ function progressUpdate(downloaded, total, started) {
   const percent = total > 0 ? Math.min(100, Math.round((downloaded / total) * 1000) / 10) : 0;
   const etaSeconds = total > 0 && speed > 0 ? (total - downloaded) / speed : null;
   return { bytesDownloaded: downloaded, totalBytes: total, percent, speed, etaSeconds };
+}
+
+function estimateEtaFromPercent(percent, startedAtMs) {
+  const pct = Number(percent) || 0;
+  if (pct <= 0 || pct >= 100) return null;
+  const elapsedSec = (Date.now() - startedAtMs) / 1000;
+  if (elapsedSec <= 0) return null;
+  const totalSec = elapsedSec / (pct / 100);
+  const remaining = totalSec - elapsedSec;
+  return remaining > 0 ? remaining : 0;
 }
 
 function abortOutcome(signal, ok = false) {
@@ -237,12 +271,20 @@ async function runStreamDownload(url, output, headers, signal, onProgress, atomi
 function makeFfmpegProgress(onProgress, durationMs) {
   let outMs = 0;
   let totalSize = 0;
+  let startedAtMs = 0;
   return ({ key, value }) => {
+    if (!startedAtMs) startedAtMs = Date.now();
     if (key === 'out_time_us') outMs = Number(value) / 1000;
     else if (key === 'out_time_ms') outMs = Number(value);
     else if (key === 'total_size') totalSize = Number(value);
     const percent = durationMs > 0 ? Math.min(100, Math.round((outMs / durationMs) * 1000) / 10) : 0;
-    onProgress({ bytesDownloaded: totalSize, totalBytes: 0, percent, speed: '', etaSeconds: null });
+    const elapsedSec = startedAtMs > 0 ? (Date.now() - startedAtMs) / 1000 : 0;
+    const speed = elapsedSec > 0 ? totalSize / elapsedSec : 0;
+    const etaSeconds =
+      durationMs > 0 && outMs > 0
+        ? Math.max(0, (durationMs - outMs) / 1000)
+        : estimateEtaFromPercent(percent, startedAtMs);
+    onProgress({ bytesDownloaded: totalSize, totalBytes: 0, percent, speed, etaSeconds });
   };
 }
 
@@ -275,9 +317,12 @@ async function runFfmpegDownload(url, output, headers, signal, onProgress, sourc
   }
 }
 
-function segmentProgressToEngine({ done, total, totalBytes, failed }) {
+function segmentProgressToEngine({ done, total, totalBytes, failed }, startedAtMs = Date.now()) {
   const percent = total > 0 ? Math.min(100, Math.round((done / total) * 1000) / 10) : 0;
-  return { bytesDownloaded: totalBytes, totalBytes: 0, percent, speed: '', etaSeconds: null, failed };
+  const elapsedSec = (Date.now() - startedAtMs) / 1000;
+  const speed = elapsedSec > 0 ? totalBytes / elapsedSec : 0;
+  const etaSeconds = estimateEtaFromPercent(percent, startedAtMs);
+  return { bytesDownloaded: totalBytes, totalBytes: 0, percent, speed, etaSeconds, failed };
 }
 
 /**
@@ -288,13 +333,35 @@ function segmentProgressToEngine({ done, total, totalBytes, failed }) {
  * `transport` opcional: evita resolver duas vezes (o chamador ja resolveu para
  * o diagnostico). `onLog` opcional: callback de diagnostico sanitizado.
  */
-async function runCurlHlsDownload(url, output, headers, signal, onProgress, transport = null, onLog = () => {}) {
+function safePathname(url) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return '';
+  }
+}
+
+function isMdstrmPlayerUrl(url) {
+  return /^https?:\/\/mdstrm\.com\/video\/[a-f0-9]+\.m3u8/i.test(String(url || ''));
+}
+
+async function runCurlHlsDownload(
+  url,
+  output,
+  headers,
+  signal,
+  onProgress,
+  transport = null,
+  onLog = () => {},
+  { preferredVariantPath = '' } = {}
+) {
   if (!transport) {
     transport = CurlImpersonateTransport.resolve({ headers });
     if (!transport) return null;
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-curl-'));
+  const segmentStartedAtMs = Date.now();
   try {
     // Playlist alvo (media ou master). `url` já é o downloadUrl preparado:
     // quando a UI escolheu qualidade, é a variante absoluta; caso contrário,
@@ -304,7 +371,11 @@ async function runCurlHlsDownload(url, output, headers, signal, onProgress, tran
     const { text: firstText, finalUrl: firstFinal } = await transport.getText(url, { signal });
     const info = parsePlaylistText(firstText, firstFinal || url);
     if (info.kind === 'master' && info.variants.length > 0) {
-      const variantUrl = new URL(info.variants[0].uri, info.baseUrl || firstFinal || url).toString();
+      const matched = preferredVariantPath
+        ? info.variants.find((variant) => safePathname(new URL(variant.uri, info.baseUrl || firstFinal || url).toString()) === preferredVariantPath)
+        : null;
+      const picked = matched || info.variants[0];
+      const variantUrl = new URL(picked.uri, info.baseUrl || firstFinal || url).toString();
       onLog(`[mdstrm/roteamento] master detectado via curl — variante escolhida: ${maskDiagUrl(variantUrl)}`);
       ({ text: mediaText, finalUrl: mediaBase } = await transport.getText(variantUrl, { signal }));
       mediaBase = mediaBase || variantUrl;
@@ -318,7 +389,7 @@ async function runCurlHlsDownload(url, output, headers, signal, onProgress, tran
       mediaBase,
       tmpDir,
       signal,
-      onProgress: (p) => onProgress?.(segmentProgressToEngine(p)),
+      onProgress: (p) => onProgress?.(segmentProgressToEngine(p, segmentStartedAtMs)),
     });
     if (!result.ok) {
       const reason = result.error === 'interrupted' ? 'interrupted' : `segmentos (${result.error})`;

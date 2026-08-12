@@ -182,6 +182,7 @@ test('fluxo mdstrm: transporte disponivel -> curl (segmentos) + mux local, nunca
 
     // O transporte específico (curl) foi usado.
     assert.ok(calls.getText.length >= 1, 'getText via curl');
+    assert.equal(calls.getText[0], playerUrl, 'curl deve começar pela URL do player, nao pela variante CDN');
     assert.ok(calls.downloadSegments >= 1, 'downloadSegments via curl');
 
     // FFmpeg recebeu a playlist LOCAL (nunca a URL remota). Se o engine

@@ -17,6 +17,7 @@
  */
 
 const URL_PROTOCOL_RE = /^https?:\/\//i;
+const INTERNAL_MEDIA_SELECTION_RE = /^(ytdlp-format:[A-Za-z0-9._-]+)$/;
 const TASK_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const FILENAME_BAD_RE = /[\\/]|\.\./;
 const ABSOLUTE_WIN_RE = /^[A-Za-z]:[\\/]/;
@@ -33,6 +34,13 @@ export function isSafeHttpUrl(value) {
   } catch {
     return false;
   }
+}
+
+/** Valida seletores internos de formato (ex.: ytdlp-format:137) ou URL segura. */
+export function isSafeMediaSelection(value) {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  const raw = String(value).trim();
+  return isSafeHttpUrl(raw) || INTERNAL_MEDIA_SELECTION_RE.test(raw);
 }
 
 /** Valida o identificador de tarefa (formato restrito). */
@@ -101,7 +109,7 @@ export function validateDownloadPayload(payload = {}) {
   // P11: URL do formato escolhido (variante HLS/DASH/YouTube) e titulo
   // opcional vindos do renderer — usados pelo engine/queue sem prompts.
   const selectedUrl = typeof payload?.selectedUrl === 'string' ? payload.selectedUrl.trim() : '';
-  if (selectedUrl && !isSafeHttpUrl(selectedUrl)) return null;
+  if (selectedUrl && !isSafeMediaSelection(selectedUrl)) return null;
   const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 200) : '';
 
   const overwriteAction = ['overwrite', 'rename', 'cancel'].includes(payload?.overwriteAction)
@@ -173,7 +181,7 @@ export function validateQueueEnqueuePayload(payload = {}) {
   if (outputDir && !isSafeAbsolutePath(outputDir)) return null;
 
   const selectedUrl = typeof payload?.selectedUrl === 'string' ? payload.selectedUrl.trim() : '';
-  if (selectedUrl && !isSafeHttpUrl(selectedUrl)) return null;
+  if (selectedUrl && !isSafeMediaSelection(selectedUrl)) return null;
 
   const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 200) : '';
   const turbo = payload?.turbo === true;

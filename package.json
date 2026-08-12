@@ -12,6 +12,7 @@
     "analyze": "node bin/streamgrab.mjs analyze",
     "download": "node bin/streamgrab.mjs download",
     "download:curl": "node src/index.js --curl-impersonate",
+    "curl:install": "node scripts/install-curl-impersonate.mjs",
     "download:youtube": "node src/index.js --youtube",
     "electron:dev": "electron .",
     "electron:serve": "electron .",

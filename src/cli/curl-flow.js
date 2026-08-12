@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { installCurlImpersonate } from '../curlimp-install.js';
 import { CurlImpersonateTransport, rewritePlaylist as _rewritePlaylist, extForUri as _extForUri } from '../transports/curl.js';
 import { parsePlaylistText } from '../hls.js';
 import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../mdstrm.js';
@@ -13,7 +14,16 @@ export const rewritePlaylist = _rewritePlaylist;
 export const extForUri = _extForUri;
 
 export async function runCurlDownloadFlow(ctx, { ask, url, output, headers }) {
-  const transport = CurlImpersonateTransport.resolve({ headers });
+  let transport = CurlImpersonateTransport.resolve({ headers });
+  if (!transport) {
+    ctx.io.log('\n[curl-impersonate] Binario ausente. Tentando instalar automaticamente...');
+    try {
+      await installCurlImpersonate({ projectRoot: process.cwd(), io: ctx.io });
+    } catch (err) {
+      ctx.io.log(`[curl-impersonate] Falha na instalacao automatica: ${err.message}`);
+    }
+    transport = CurlImpersonateTransport.resolve({ headers });
+  }
   if (!transport) {
     printCurlImpHelp(ctx.io);
     return { ok: false, error: 'curl-ausente' };

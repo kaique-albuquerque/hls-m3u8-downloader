@@ -63,7 +63,7 @@ export async function runDownloadFlow(ctx, { url, output, headers, extraArgs = [
     ctx.interruptHandled = false;
     const result = await promise;
     ctx.currentFfmpeg = null;
-    progress.finish();
+    progress.finish(result.ok);
 
     if (result.ok) {
       return { ok: true, modeIndex };
@@ -119,7 +119,7 @@ export async function runMuxedDownloadFlow(ctx, { videoUrl, audioUrl, output, he
     ctx.currentFfmpeg = { stop };
     const result = await promise;
     ctx.currentFfmpeg = null;
-    progress.finish();
+    progress.finish(result.ok);
     if (result.ok) return { ok: true, modeIndex: 0 };
     if (result.interrupted || ctx.interruptHandled) {
       cleanupPartial(output);

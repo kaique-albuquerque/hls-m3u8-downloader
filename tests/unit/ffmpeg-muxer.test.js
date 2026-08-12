@@ -12,6 +12,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { mock } from 'node:test';
 
+import { DEFAULT_USER_AGENT } from '../../src/utils.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 const SERVICE_URL = pathToFileURL(path.join(ROOT, 'src', 'ffmpeg', 'service.js')).href;
@@ -46,6 +48,7 @@ test('muxer: buildDownloadArgs modo copy (padrao)', () => {
   assert.equal(args[0], '-hide_banner');
   assert.deepEqual(args, [
     '-hide_banner', '-loglevel', 'error', '-nostats', '-y',
+    '-headers', `User-Agent: ${DEFAULT_USER_AGENT}\r\n`,
     '-i', 'https://exemplo/a.mp4',
     '-progress', 'pipe:1',
     '-c', 'copy',
@@ -68,6 +71,31 @@ test('muxer: buildDownloadArgs injeta headers e extraArgs antes do -i', () => {
   assert.equal(args[args.indexOf('-i') - 2], '-allowed_extensions');
   assert.equal(args[args.indexOf('-i') - 1], 'ALL');
   assert.deepEqual(args.slice(-5), ['-c', 'copy', '-bsf:a', 'aac_adtstoasc', 'o.mp4']);
+});
+
+test('muxer: buildDownloadArgs injeta User-Agent padrao quando ausente', () => {
+  const args = buildDownloadArgs({
+    url: 'u.m3u8',
+    output: 'o.mp4',
+    headers: { Referer: 'https://exemplo/' },
+  });
+  const headersIdx = args.indexOf('-headers');
+  assert.ok(headersIdx > 0, 'deve conter -headers');
+  assert.equal(
+    args[headersIdx + 1],
+    `Referer: https://exemplo/\r\nUser-Agent: ${DEFAULT_USER_AGENT}\r\n`
+  );
+});
+
+test('muxer: buildDownloadArgs nao envia -headers para playlist local', () => {
+  const args = buildDownloadArgs({
+    url: 'C:\\temp\\local.m3u8',
+    output: 'o.mp4',
+    headers: { Referer: 'https://exemplo/' },
+    extraArgs: ['-allowed_extensions', 'ALL'],
+  });
+  assert.equal(args.includes('-headers'), false, 'entrada local nao deve receber -headers');
+  assert.ok(args.includes('-i'));
 });
 
 test('muxer: buildDownloadArgs outputArgs entram depois do -i (P9 audio-only)', () => {
