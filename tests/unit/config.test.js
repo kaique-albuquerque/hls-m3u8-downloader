@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   loadConfig,
+  mergeConfigWithSettings,
   parseCliHeaders,
   parseCliAuth,
   isGoogleVideoPlaybackUrl,
@@ -22,7 +23,7 @@ const silentIo = { log() {} };
 test('config loadConfig: sem config.json retorna defaults', () => {
   const dir = tempDir();
   const config = loadConfig(dir, silentIo);
-  assert.deepEqual(config, { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8 });
+  assert.deepEqual(config, { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8, smartTurbo: false });
 });
 
 test('config loadConfig: config.json completo', () => {
@@ -43,6 +44,7 @@ test('config loadConfig: config.json completo', () => {
   assert.equal(config.cookiesFromBrowser, 'chrome');
   assert.equal(config.turbo, true);
   assert.equal(config.turboChunks, 4);
+  assert.equal(config.smartTurbo, false);
 });
 
 test('config loadConfig: turboChunks invalido cai para 8', () => {
@@ -56,9 +58,38 @@ test('config loadConfig: JSON invalido loga aviso e usa defaults', () => {
   fs.writeFileSync(path.join(dir, 'config.json'), '{nao-e-json');
   const logs = [];
   const config = loadConfig(dir, { log: (msg) => logs.push(msg) });
-  assert.deepEqual(config, { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8 });
+  assert.deepEqual(config, { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8, smartTurbo: false });
   assert.equal(logs.length, 1);
   assert.match(logs[0], /AVISO.*config\.json/);
+});
+
+// ---- P6.2: Smart Turbo via config ----
+test('config loadConfig: smartTurbo: true liga o Smart Turbo', () => {
+  const dir = tempDir();
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ smartTurbo: true }));
+  assert.equal(loadConfig(dir, silentIo).smartTurbo, true);
+});
+
+test('config loadConfig: smartTurbo objeto de opcoes e preservado', () => {
+  const dir = tempDir();
+  const opts = { min: 2, max: 6, windowMs: 800 };
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ smartTurbo: opts }));
+  assert.deepEqual(loadConfig(dir, silentIo).smartTurbo, opts);
+});
+
+test('config mergeConfigWithSettings: settings P7 vence e carrega smartTurbo', () => {
+  const dir = tempDir();
+  fs.writeFileSync(path.join(dir, 'streamgrab.settings.json'), JSON.stringify({ turbo: true, smartTurbo: { max: 10 } }));
+  const merged = mergeConfigWithSettings({ projectRoot: dir, settingsFile: path.join(dir, 'streamgrab.settings.json') });
+  assert.equal(merged.turbo, true);
+  assert.deepEqual(merged.smartTurbo, { max: 10 });
+});
+
+test('config mergeConfigWithSettings: smartTurbo invalido cai para default false', () => {
+  const dir = tempDir();
+  fs.writeFileSync(path.join(dir, 'streamgrab.settings.json'), JSON.stringify({ smartTurbo: 'nao-e-valido' }));
+  const merged = mergeConfigWithSettings({ projectRoot: dir, settingsFile: path.join(dir, 'streamgrab.settings.json') });
+  assert.equal(merged.smartTurbo, false);
 });
 
 // ---- parseCliHeaders ----

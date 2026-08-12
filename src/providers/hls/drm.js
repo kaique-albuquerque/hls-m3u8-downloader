@@ -25,7 +25,11 @@ export function checkHlsDrm(text) {
   if (/#EXT-X-SESSION-KEY/gi.test(s)) {
     throw new UnsupportedDrmError(
       'A playlist usa criptografia de sessão (DRM). StreamGrab não suporta conteúdo protegido por DRM.',
-      { detail: '#EXT-X-SESSION-KEY detectado na playlist master' }
+      {
+        detail:
+          '#EXT-X-SESSION-KEY detectado na playlist master — esquemas típicos: ' +
+          'FairPlay (skd://), Widevine ou PlayReady.',
+      }
     );
   }
 

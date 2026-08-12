@@ -7,3 +7,18 @@ vendor/
 build/
 dist/
 *.tmp
+
+# Relatorios temporarios de testes/benchmarks/lint (P4-P9) — nunca commitar.
+# Nao e um ignore global de *.txt: sao padroes especificos por prefixo.
+baseline-*.txt
+conc*.txt
+eng-reg-*.txt
+engine-*.txt
+full-*.txt
+lint*.txt
+p4-*.txt
+p5-*.txt
+test-output*.txt
+
+# Pasta padrao p/ relatorios futuros de testes (npm test > test-results/...)
+test-results/

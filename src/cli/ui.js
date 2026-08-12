@@ -32,6 +32,7 @@ export function printUsage(io) {
   io.log('  --cookies-from-browser <b>  Extrai cookies do navegador: chrome, edge, firefox...');
   io.log('  --turbo              Download paralelo por partes (mais rapido em URLs diretas)');
   io.log('  --chunks <n>         Numero de conexoes do modo turbo (padrao: 8)');
+  io.log('  --no-resume          Desliga o resume do turbo (interrupcao descarta o parcial)');
   io.log('');
 }
 

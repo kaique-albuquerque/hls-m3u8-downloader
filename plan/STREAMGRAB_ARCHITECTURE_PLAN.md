@@ -867,6 +867,27 @@ Não sacrificar estabilidade para implementar rapidamente todas as features da s
 
 ---
 
-**PLANO REVISADO — AGUARDANDO APROVAÇÃO PARA INICIAR P0.**
+## 25. Status de Execução do Plano
 
-Nenhum arquivo de código foi modificado. Ao aprovar, começo pela **P0 (Regression/Characterization Tests)** e, ao concluí-la, apresento o relatório de 12 itens e paro.
+**CONCLUÍDO em 2026-08-12.** Todas as 18 partes (P0, P1, P2.1–P2.6, P3, P4, P5, P7,
+P8, P10, P9, P6.1, P6.2, P11) foram implementadas, testadas e aprovadas pelo usuário.
+
+| Fase | Partes | Entregável | Status |
+|---|---|---|---|
+| A — Fundação | P0, P1, P2.1–P2.6, P3, P4, P5 | Testes, branding, core, providers, transports, FFmpeg central | ✅ Concluída |
+| B — Produto Desktop | P7, P8, P10 | Fila/settings/histórico, nova UI, installer Windows | ✅ Concluída |
+| C — Download Management | P9, P6.1 | CLI evoluída, resume | ✅ Concluída |
+| D — Performance | P6.2 | Smart Turbo orientado por benchmark | ✅ Concluída |
+| E — Maturidade | P11 | Docs, segurança, DRM, baseline, refinamentos | ✅ Concluída |
+
+**Estado final validado (2026-08-12):** suite completa **587/587** testes passando
+(unit 555 + integração + E2E); lint **0 erros / 6 avisos** (baseline pré-existente);
+baselines em `tests/performance/BASELINE.md` (smart turbo) e `docs/performance.md`
+(core); docs novos: `CONTRIBUTING.md`, `docs/roadmap.md`, `docs/architecture.md`.
+
+**Fora do escopo do plano (próximas candidatas, não aprovadas):** Fase E restante
+(multi-plataforma Linux/macOS, CI em tags com release notes automáticas, auto-update,
+observabilidade/export de log de diagnóstico, reavaliação de TypeScript) e a decisão de
+fechamento da `1.0.0` (SemVer — ADR-001).
+
+**PLANO DE IMPLANTAÇÃO CONCLUÍDO — todas as partes P0–P11 implementadas, testadas e aprovadas.**

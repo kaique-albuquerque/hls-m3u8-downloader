@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeHeaders } from '../utils.js';
-import { createSettingsStore, DEFAULT_SETTINGS } from '../core/settings.js';
+import { createSettingsStore, DEFAULT_SETTINGS, normalizeSettings } from '../core/settings.js';
 
 export function loadConfig(projectRoot, io) {
   const configPath = path.join(projectRoot, 'config.json');
@@ -16,12 +16,14 @@ export function loadConfig(projectRoot, io) {
         cookiesFromBrowser: raw.cookiesFromBrowser || '',
         turbo: raw.turbo === true,
         turboChunks: Number(raw.turboChunks) > 0 ? Number(raw.turboChunks) : 8,
+        // P6.2: false/null desliga (rollback); true|objeto liga o Smart Turbo.
+        smartTurbo: raw.smartTurbo ?? false,
       };
     }
   } catch (err) {
     io.log(`[AVISO] config.json invalido: ${err.message}`);
   }
-  return { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8 };
+  return { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8, smartTurbo: false };
 }
 
 /**
@@ -37,9 +39,10 @@ export function mergeConfigWithSettings({ projectRoot, io = { log() {} }, settin
   const settings = createSettingsStore({ file });
   const merged = { ...legacy };
 
-  const st = settings.all();
+  const st = normalizeSettings(settings.all());
   merged.turbo = st.turbo;
   merged.turboChunks = st.turboChunks;
+  merged.smartTurbo = st.smartTurbo;
   merged.defaultDir = st.defaultDir || '';
   merged.maxConcurrentDownloads = st.maxConcurrentDownloads;
   merged.defaultQuality = st.defaultQuality;

@@ -14,7 +14,7 @@ function makeTempDir() {
 // DEFAULT_SETTINGS / normalizeSettings
 // ---------------------------------------------------------------------------
 
-test('DEFAULT_SETTINGS tem as 10 chaves do plano (seção 22)', () => {
+test('DEFAULT_SETTINGS tem as 11 chaves do plano (seção 22 + P6.2 smartTurbo)', () => {
   assert.deepEqual(Object.keys(DEFAULT_SETTINGS).sort(), [
     'audio',
     'defaultDir',
@@ -23,6 +23,7 @@ test('DEFAULT_SETTINGS tem as 10 chaves do plano (seção 22)', () => {
     'maxConcurrentDownloads',
     'notifications',
     'onComplete',
+    'smartTurbo',
     'theme',
     'turbo',
     'turboChunks',
@@ -53,6 +54,16 @@ test('normalizeSettings coage tipos (NaN mantem default; string vira numero)', (
 test('normalizeSettings ignora version e nao aceita null', () => {
   assert.deepEqual(normalizeSettings({ version: 9, turbo: true }), { turbo: true });
   assert.deepEqual(normalizeSettings(null), {});
+});
+
+test('normalizeSettings smartTurbo: boolean e objeto aceitos; invalido cai para default', () => {
+  assert.equal(normalizeSettings({ smartTurbo: true }).smartTurbo, true);
+  assert.deepEqual(normalizeSettings({ smartTurbo: { max: 6, windowMs: 500 } }).smartTurbo, { max: 6, windowMs: 500 });
+  assert.equal(normalizeSettings({ smartTurbo: false }).smartTurbo, false);
+  // string/array/null nao sao aceitos -> mantem default (false)
+  assert.equal(normalizeSettings({ smartTurbo: 'sim' }).smartTurbo, false);
+  assert.equal(normalizeSettings({ smartTurbo: [1, 2] }).smartTurbo, false);
+  assert.equal(normalizeSettings({ smartTurbo: null }).smartTurbo, false);
 });
 
 // ---------------------------------------------------------------------------

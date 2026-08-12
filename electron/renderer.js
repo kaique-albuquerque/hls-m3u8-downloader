@@ -127,10 +127,14 @@ window.api.onDownloadDone(({ taskId, result }) => {
 
   tab.fields.progress.style.width = '0%';
   tab.fields.percent.textContent = '0%';
-  const message = buildErrorMessage(result);
+  // P11 (secao 42 — UX de falhas): Motivo / Acao sugerida / [Detalhes].
+  const err = result?.error || {};
+  const message = err.message || buildErrorMessage(result);
   tab.fields.modeLabel.textContent = 'Falha no download';
   setStatus(tab, `O download nao pode ser concluido: ${message}`);
   appendLog(tab, `ERRO: ${message}`);
+  if (err.suggestedAction) appendLog(tab, `Acao sugerida: ${err.suggestedAction}`);
+  if (err.detail) appendLog(tab, `Detalhes: ${err.detail}`);
 });
 
 newTabBtn.addEventListener('click', () => addTab());
@@ -292,6 +296,16 @@ function addTab({ copyFrom } = {}) {
 
     try {
       const info = await window.api.analyzePlaylist({ url, headers: {} });
+      // P11 (secao 42 — UX de falhas): erro normalizado do main process.
+      if (info && info.ok === false) {
+        const err = info.error || {};
+        setStatus(state, `Erro ao analisar: ${err.message || 'falha desconhecida'}`);
+        appendLog(state, `[ERRO] ${err.message || 'falha desconhecida'}`);
+        if (err.suggestedAction) appendLog(state, `Acao sugerida: ${err.suggestedAction}`);
+        if (err.detail) appendLog(state, `Detalhes: ${err.detail}`);
+        fields.modeLabel.textContent = 'Falha na analise';
+        return;
+      }
       state.sourceUrl = url;
       state.analysisBaseUrl = info.baseUrl || info.media?.baseUrl || url;
       state.media = info.media || null;

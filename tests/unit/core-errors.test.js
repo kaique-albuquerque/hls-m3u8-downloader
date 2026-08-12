@@ -19,6 +19,7 @@ import {
   isStreamGrabError,
   isRetryable,
   classifyError,
+  friendlyReport,
 } from '../../src/core/errors.js';
 
 test('core-errors: todas as classes existem e herdam StreamGrabError/Error', () => {
@@ -156,4 +157,68 @@ test('core-errors: isRetryable so respeita taxonomia', () => {
   assert.equal(isRetryable(new NetworkError()), true);
   assert.equal(isRetryable(new AuthenticationError()), false);
   assert.equal(isRetryable(new Error('qualquer')), false);
+});
+
+test('core-errors: P11 — toda classe tem acao sugerida (secao 42)', () => {
+  const cases = [
+    new UnsupportedSourceError(),
+    new NetworkError(),
+    new AuthenticationError(),
+    new ForbiddenError(),
+    new RateLimitError(),
+    new ExpiredUrlError(),
+    new MediaNotFoundError(),
+    new FFmpegError(),
+    new YtDlpError(),
+    new DiskSpaceError(),
+    new PermissionError(),
+    new UnsupportedDrmError(),
+    new CancelledError(),
+  ];
+  for (const err of cases) {
+    assert.ok(
+      typeof err.suggestedAction === 'string' && err.suggestedAction.length > 0,
+      `${err.name} deve ter suggestedAction`
+    );
+  }
+  // Instancia customizada pode sobrescrever a acao sugerida default.
+  const custom = new ForbiddenError('x', { suggestedAction: 'Renove a URL.' });
+  assert.equal(custom.suggestedAction, 'Renove a URL.');
+});
+
+test('core-errors: P11 — friendlyReport normaliza instancia da taxonomia', () => {
+  const report = friendlyReport(
+    new ExpiredUrlError('A URL expirou.', { detail: 'status=403, body=Signature expired', status: 403 })
+  );
+  assert.equal(report.name, 'ExpiredUrlError');
+  assert.equal(report.message, 'A URL expirou.');
+  assert.ok(report.suggestedAction.includes('Analise novamente a URL'));
+  assert.equal(report.detail, 'status=403, body=Signature expired');
+  assert.equal(report.code, 'EXPIRED_URL_ERROR');
+  assert.equal(report.retryable, false);
+  assert.equal(report.status, 403);
+});
+
+test('core-errors: P11 — friendlyReport classifica erro cru (sem taxonomia)', () => {
+  const report = friendlyReport(Object.assign(new Error('forbidden'), { status: 403 }));
+  assert.equal(report.name, 'ForbiddenError');
+  assert.equal(report.code, 'FORBIDDEN_ERROR');
+  assert.ok(report.suggestedAction.length > 0);
+  assert.equal(report.status, 403);
+});
+
+test('core-errors: P11 — friendlyReport fallback generico tem acao vazia e nunca lanca', () => {
+  const report = friendlyReport(new Error('algo estranho'));
+  assert.equal(report.code, 'STREAMGRAB_ERROR');
+  assert.equal(report.suggestedAction, '');
+  assert.equal(report.message, 'algo estranho');
+  const empty = friendlyReport(null);
+  assert.ok(empty.message.length > 0);
+  assert.equal(empty.code, 'STREAMGRAB_ERROR');
+});
+
+test('core-errors: P11 — toJSON inclui suggestedAction', () => {
+  const parsed = JSON.parse(JSON.stringify(new ForbiddenError('x')));
+  assert.equal(parsed.code, 'FORBIDDEN_ERROR');
+  assert.ok(parsed.suggestedAction.length > 0);
 });

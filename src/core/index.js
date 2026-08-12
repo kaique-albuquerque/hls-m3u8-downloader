@@ -13,6 +13,12 @@
  * P7 — adiciona Storage (escrita atomica JSON), Settings (preferencias
  * persistidas), History (historico local), Queue (fila de downloads),
  * Disk (espaco em disco) e Atomic (.part -> rename) à API publica.
+ *
+ * P6.1 — adiciona Resume (DownloadState persistido + validators ETag/
+ * Last-Modified/tamanho) e Session (reanalise de URL expirada) à API publica.
+ *
+ * P6.2 — adiciona Smart Turbo (turbo adaptativo orientado por baseline) à
+ * API publica.
  */
 
 export { StreamGrabCore, createStreamGrabCore, createDefaultExecutor } from './registry.js';
@@ -36,3 +42,6 @@ export * from './history.js';
 export * from './queue.js';
 export * from './disk.js';
 export * from './atomic.js';
+export * from './resume.js';
+export * from './session.js';
+export * from './smart-turbo.js';

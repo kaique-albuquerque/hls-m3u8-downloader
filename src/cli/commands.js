@@ -67,6 +67,7 @@ export function printSubcommandHelp(io) {
   io.log('  --audio-only                 Baixa apenas o audio');
   io.log('  --turbo                      Download paralelo por partes (URLs diretas)');
   io.log('  --chunks <n>                 Conexoes do turbo (padrao: 8)');
+  io.log('  --no-resume                  Desliga resume do turbo (descarta parcial)');
   io.log('  --cookies <arquivo>          cookies.txt (Netscape)');
   io.log('  --cookies-from-browser <b>   Extrai cookies do navegador');
   io.log('  --curl-impersonate           Forca o modo curl-impersonate para HLS');
@@ -93,6 +94,7 @@ export function parseDownloadFlags(rest = []) {
     audioOnly: false,
     turbo: false,
     chunks: 0,
+    noResume: false,
     forceCurl: false,
     cookiesFile: '',
     cookiesFromBrowser: '',
@@ -106,6 +108,7 @@ export function parseDownloadFlags(rest = []) {
     else if (arg === '--audio-only') flags.audioOnly = true;
     else if (arg === '--turbo') flags.turbo = true;
     else if (arg === '--chunks') flags.chunks = Number(rest[++i]) || 0;
+    else if (arg === '--no-resume') flags.noResume = true;
     else if (arg === '--curl-impersonate' || arg === '--ci') flags.forceCurl = true;
     else if (arg === '--cookies') flags.cookiesFile = rest[++i] || '';
     else if (arg === '--cookies-from-browser') flags.cookiesFromBrowser = rest[++i] || '';
@@ -219,6 +222,7 @@ export function buildDownloadArgv({ options = {}, auth = {} }) {
   const argv = [];
   if (options.turbo) argv.push('--turbo');
   if (options.chunks > 0) argv.push('--chunks', String(options.chunks));
+  if (options.noResume) argv.push('--no-resume');
   if (options.forceCurl) argv.push('--curl-impersonate');
   if (auth.cookiesFile) argv.push('--cookies', auth.cookiesFile);
   if (auth.cookiesFromBrowser) argv.push('--cookies-from-browser', auth.cookiesFromBrowser);

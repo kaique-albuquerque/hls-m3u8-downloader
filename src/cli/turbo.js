@@ -4,11 +4,18 @@ import path from 'node:path';
 import { mux } from '../ffmpeg/muxer.js';
 import { formatBytes } from '../utils.js';
 import { downloadParallelRanges, probeRangeSupport } from '../transports/range.js';
+import { defaultStatePath, clearState } from '../core/resume.js';
 import { createProgressReporter } from './progress.js';
 import { cleanupPartial } from './download.js';
 
 /** Quantidade padrao de conexoes paralelas no modo turbo. */
 export const DEFAULT_TURBO_CHUNKS = 8;
+
+/** Remove o parcial E o sidecar de resume (`--no-resume`/fallback). */
+export async function cleanupResumeArtifacts(output) {
+  cleanupPartial(output);
+  await clearState(defaultStatePath(output));
+}
 
 /**
  * Verifica se o servidor aceita Range (download por partes). Dispara uma
@@ -26,6 +33,13 @@ async function probeRange(url, headers, signal) {
  *   { ok: true } | { ok: false, error: 'no-range' } | { ok: false, interrupted: true } | { ok: false, error: 'other' }
  *
  * `signal` (opcional) e um AbortController — mesmo contrato dos fluxos legados.
+ *
+ * P6.1: `resume: true` (padrao) — interrupcao MANTEM o parcial + sidecar
+ * (`<output>.resume.json`) para a proxima execucao retomar; `resume: false`
+ * (flag `--no-resume`) restaura a limpeza antiga do parcial no cancelamento.
+ *
+ * P6.2: `smartTurbo` (true|objeto) ativa o pool dinamico (rampa/backoff por
+ * baseline); `false`/ausente = rollback (pool fixo antigo).
  */
 export async function runTurboDownloadFlow(ctx, {
   url,
@@ -35,6 +49,11 @@ export async function runTurboDownloadFlow(ctx, {
   label = 'Baixando',
   chunkCount = DEFAULT_TURBO_CHUNKS,
   signal,
+  resume = true,
+  smartTurbo,
+  onTurboDecision,
+  onExpiredUrl,
+  onResume,
 }) {
   const ownAbort = new AbortController();
   const abort = signal || ownAbort;
@@ -47,12 +66,17 @@ export async function runTurboDownloadFlow(ctx, {
     try {
       probe = await probeRange(url, headers, sig);
     } catch (err) {
-      if (sig.aborted) return { ok: false, interrupted: true };
+      if (sig.aborted) {
+        if (!resume) cleanupPartial(output);
+        return { ok: false, interrupted: true };
+      }
       ctx.io.log(`[AVISO] Turbo: ${err.message}`);
+      if (!resume) await clearState(defaultStatePath(output));
       return { ok: false, error: 'no-range' };
     }
     if (!probe.ok) {
       ctx.io.log('[AVISO] Turbo: o servidor nao suporta download por partes (Range). Usando fluxo normal.');
+      if (!resume) await clearState(defaultStatePath(output));
       return { ok: false, error: 'no-range' };
     }
 
@@ -67,7 +91,7 @@ export async function runTurboDownloadFlow(ctx, {
     const available = ctx.resourceLimiter?.connections?.available;
     const concurrency = available != null ? Math.max(1, Math.min(chunkCount, available || 1)) : chunkCount;
 
-    // 3) Download paralelo via transporte Range.
+    // 3) Download paralelo via transporte Range (P6.1: resume por default).
     await downloadParallelRanges({
       url,
       output,
@@ -75,11 +99,20 @@ export async function runTurboDownloadFlow(ctx, {
       signal: sig,
       chunkCount,
       concurrency,
+      smartTurbo,
       onProgress: onTransportProgress,
+      onTurboDecision: onTurboDecision || ((d) => {
+        if (d.action !== 'hold') {
+          ctx.io.log(`[turbo] Smart Turbo: ${d.action === 'up' ? 'subindo' : 'reduzindo'} para ${d.concurrency} conexoes (${d.reason}).`);
+        }
+      }),
+      resume,
+      onExpiredUrl,
+      onResume,
     });
 
     if (sig.aborted) {
-      cleanupPartial(output);
+      if (!resume) cleanupPartial(output);
       return { ok: false, interrupted: true };
     }
 
@@ -90,16 +123,28 @@ export async function runTurboDownloadFlow(ctx, {
     return { ok: true };
   } catch (err) {
     if (sig.aborted) {
-      cleanupPartial(output);
+      if (!resume) cleanupPartial(output);
       return { ok: false, interrupted: true };
     }
     if (err?.code === 'RANGE_UNSUPPORTED' || err?.code === 'INVALID_CONTENT_RANGE') {
       ctx.io.log('[AVISO] Turbo: o servidor parou de responder Range no meio do download. Usando fluxo normal.');
-      cleanupPartial(output);
+      if (resume) {
+        // P6.1: descarta parcial + sidecar antes do fallback (re-baixa limpo).
+        await cleanupResumeArtifacts(output);
+      } else {
+        cleanupPartial(output);
+      }
       return { ok: false, error: 'no-range' };
     }
     ctx.io.log(`[AVISO] Turbo falhou (${err.message}). Usando fluxo normal.`);
-    cleanupPartial(output);
+    if (resume && err?.code !== 'RANGE_UNSUPPORTED' && err?.code !== 'INVALID_CONTENT_RANGE') {
+      // P6.1: erro nao-terminal -> mantem parcial + sidecar p/ retomada futura
+      // (o fluxo normal recomeca; nada e corrompido — resume valida por ETag).
+      ctx.io.log('[Resume] Parcial preservado; a proxima execucao retoma deste ponto.');
+    } else {
+      cleanupPartial(output);
+      await clearState(defaultStatePath(output));
+    }
     return { ok: false, error: 'other' };
   } finally {
     if (!signal) ctx.turboAbort = null;
@@ -126,8 +171,9 @@ export async function runTurboMuxedDownloadFlow(ctx, {
     const abort = new AbortController();
     ctx.turboAbort = abort;
     const [video, audio] = await Promise.all([
-      runTurboDownloadFlow(ctx, { url: videoUrl, output: videoTmp, headers, durationMs, label: 'Video', signal: abort }),
-      runTurboDownloadFlow(ctx, { url: audioUrl, output: audioTmp, headers, durationMs, label: 'Audio', signal: abort }),
+      // tmpDir e efemero (removido no finally) — resume de streams nao se aplica.
+      runTurboDownloadFlow(ctx, { url: videoUrl, output: videoTmp, headers, durationMs, label: 'Video', signal: abort, resume: false }),
+      runTurboDownloadFlow(ctx, { url: audioUrl, output: audioTmp, headers, durationMs, label: 'Audio', signal: abort, resume: false }),
     ]);
     ctx.turboAbort = null;
     if (!video.ok) return video;

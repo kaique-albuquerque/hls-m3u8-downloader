@@ -101,6 +101,28 @@ export async function runCliSession({
   else if (config.turboChunks > 0) turboChunks = config.turboChunks;
   if (turboEnabled) safeIo.log(`[turbo] Download paralelo ativado (${turboChunks} conexoes).`);
 
+  // P6.2 — Smart Turbo (adaptativo por baseline): `--smart-turbo` liga por CLI
+  // (defaults); `--no-smart-turbo` desliga (rollback explicito); config.json/
+  // settings `smartTurbo` liga com defaults ou objeto de opcoes. Sem turbo, o
+  // Smart Turbo nao faz sentido.
+  const smartTurboFlag = argv.includes('--smart-turbo') ? true : argv.includes('--no-smart-turbo') ? false : config.smartTurbo;
+  const smartTurboEnabled =
+    turboEnabled &&
+    smartTurboFlag !== false &&
+    (smartTurboFlag === true || (smartTurboFlag && typeof smartTurboFlag === 'object'));
+  if (smartTurboEnabled) {
+    const opts = typeof smartTurboFlag === 'object' ? smartTurboFlag : {};
+    const detail = opts.max ? ` (max ${opts.max}, janela ${opts.windowMs || 1200}ms)` : '';
+    safeIo.log(`[turbo] Smart Turbo ativado${detail} — concurrency adaptativa (rampa/backoff).`);
+  } else if (turboEnabled && smartTurboFlag !== false) {
+    safeIo.log('[turbo] Smart Turbo desligado (pool fixo) — habilite via config.smartTurbo.');
+  }
+
+  // P6.1 — Resume de downloads por partes: ativo por default; `--no-resume` desliga
+  // (rollback: restaura truncate + limpeza do parcial no cancelamento).
+  const resumeEnabled = !argv.includes('--no-resume') && config.resume !== false;
+  if (turboEnabled && !resumeEnabled) safeIo.log('[resume] Desativado (--no-resume): interrupcoes descartam o parcial.');
+
   safeIo.onState?.({ state: 'ffmpeg-check' });
   safeIo.log('\nVerificando FFmpeg...');
   if (!(await checkFfmpeg())) {
@@ -311,6 +333,7 @@ export async function runCliSession({
       durationMs: preparedPlan.durationMs,
     };
     if (turboEnabled) {
+      // Muxed usa tmpDir efemero (removido no finally) — resume de streams nao se aplica.
       result = await runTurboMuxedDownloadFlow(ctx, muxOpts);
       if (!result.ok && result.error === 'no-range') {
         safeIo.log('\n[AVISO] Turbo indisponivel; voltando ao fluxo padrao...');
@@ -327,6 +350,8 @@ export async function runCliSession({
       totalBytes: preparedPlan?.totalBytes,
       durationMs: preparedPlan?.durationMs,
       chunkCount: turboChunks,
+      resume: resumeEnabled,
+      smartTurbo: smartTurboEnabled ? smartTurboFlag : false,
     });
     if (!result.ok && result.error === 'no-range') {
       safeIo.log('[AVISO] Turbo indisponivel; voltando ao fluxo padrao...');

@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   maxConcurrentDownloads: 3,
   turbo: false,
   turboChunks: 8,
+  smartTurbo: false, // P6.2: false/null = desligado (rollback); true|objeto = adaptativo
   defaultQuality: 'best',
   audio: 'original',
   notifications: true,
@@ -31,6 +32,7 @@ const SCHEMA = {
   maxConcurrentDownloads: { type: 'number', clamp: [1, 16] },
   turbo: { type: 'boolean', clamp: null },
   turboChunks: { type: 'number', clamp: [1, 32] },
+  smartTurbo: { type: 'json', clamp: null },
   defaultQuality: { type: 'string', clamp: null },
   audio: { type: 'string', clamp: null },
   notifications: { type: 'boolean', clamp: null },
@@ -49,6 +51,15 @@ function coerce(key, value, current) {
     if (spec.clamp) out = Math.min(spec.clamp[1], Math.max(spec.clamp[0], out));
   } else if (spec.type === 'boolean') {
     out = Boolean(value);
+  } else if (spec.type === 'json') {
+    // boolean (liga/desliga) ou objeto (opcoes do Smart Turbo)
+    if (typeof value === 'boolean') {
+      out = value;
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out = { ...value };
+    } else {
+      return current;
+    }
   } else {
     out = String(value);
   }

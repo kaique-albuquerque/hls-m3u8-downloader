@@ -9,6 +9,114 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 ## [Não publicado]
 
 ### Adicionado
+
+- **Maturidade (P11, seções 34/35/36/42/43/49 do architect.md):** README como produto,
+  documentação de contribuição e arquitetura, roadmap público, UX de falhas estruturada,
+  DRM com erro claro e baseline de performance do core.
+  - **UX de falhas "Motivo / Ação sugerida / [Detalhes]" (seção 42):**
+    - `src/core/errors.js` — toda classe da taxonomia (13) agora carrega `suggestedAction`
+      em PT-BR (ex.: `UnsupportedDrmError`: 'Este conteudo e protegido por DRM
+      (Widevine/PlayReady/FairPlay) e nao pode ser baixado pelo StreamGrab.'; `ExpiredUrlError`:
+      'Analise novamente a URL para obter um novo endereco valido.'; `AuthenticationError`:
+      'O conteudo parece exigir login. Forneca cookies com --cookies <arquivo> ou
+      --cookies-from-browser <navegador>.'), construtor aceita override, e `toJSON()`
+      inclui o campo.
+    - `friendlyReport(err)` — normaliza qualquer erro (instância da taxonomia, erro cru
+      classificado, ou valor inesperado) em `{ name, message, suggestedAction, detail, code,
+      retryable, status }` sem nunca lançar (fallback genérico com ação vazia).
+    - `src/cli/render.js` — `printAnalysisError` renderiza Motivo / Ação sugerida / Detalhes
+      (substitui ramos hardcoded de 403/needsAuth).
+    - `electron/main.js` — handler `playlist:analyze` retorna `{ ok: false, error:
+      friendlyReport(err) }`; download retorna `error: friendlyReport(err)`; payload inválido
+      ganha `suggestedAction` própria.
+    - `electron/renderer.js` — falha de análise e falha de download exibem mensagem, ação
+      sugerida e detalhes.
+    - 5 testes unitários novos em `tests/unit/core-errors.test.js` (todas as classes têm ação
+      sugerida; friendlyReport normaliza instância/erro cru/fallback e nunca lança; toJSON).
+  - **DRM explícito (seção 43):** detecção Widevine/PlayReady/FairPlay já existente em
+    `src/providers/hls/drm.js` (SESSION-KEY / METHOD SAMPLE-AES / FairPlay / Widevine /
+    PlayReady) e `src/providers/dash/drm.js` (ContentProtection schemeIdUri) lança
+    `UnsupportedDrmError` — agora com `suggestedAction` e relatório amigável em CLI/Electron
+    (verificado; sem contorno de DRM).
+  - **Baseline de performance (seção 49):** `tests/performance/baseline-core.mjs` — mede
+    análise (HLS master/media + DASH em fixtures locais), download 16 MiB por Range local
+    (c=1 e c=8), CPU/memória durante o download e mux FFmpeg (remux copy 5s) em máquina
+    atual, e grava `docs/performance.md`.
+  - **Docs novos:** `CONTRIBUTING.md` (setup, arquitetura, como criar um provider, testes,
+    estilo, PRs), `docs/roadmap.md` (Fases A–E públicas), `docs/architecture.md`
+    (diagramas + 15 ADRs).
+  - **README:** reescrita de claims sem números hardcoded de sites (removido "mais de 1.800
+    sites"); limitações de DRM explícitas (já presentes no aviso de uso responsável).
+
+### Alterado
+- **Smart Turbo (P6.2, seção 14 do architect.md):** turbo adaptativo **orientado por
+  benchmark** — a heurística nasce do baseline `tests/performance/BASELINE.md`, não de
+  suposição.
+  - `src/core/smart-turbo.js` — módulo puro e stateful: `SMART_TURBO_DEFAULTS`
+    (min 2 / max 12 / initial 2 / janela 1200 ms / perConnDropRatio 0.3 /
+    totalGainRatio 0.05 / backoff 0.5 / cooldown 3 / rampa 3), `createSmartTurbo`,
+    `normalizeSmartTurbo` (boolean|objeto), `isRetryableChunkError` (RATE_LIMIT_ERROR ou
+    NETWORK_ERROR retryable/status ≥ 500).
+    - Decisões derivadas do baseline: queda do throughput por conexão > 30% com total
+      estagnado = throttling (baseline throttle-1 MB/s: por-conexão cai de ~927 KB/s
+      (c=1) para ~54 KB/s (c=16)); janela sem dados não pune (latência alta: baseline
+      latency-80 ms mostra que mais conexões ajudam); subir por crescimento exige 2
+      janelas consecutivas (histerese — o total do throttle oscila ±8% entre janelas e
+      uma única janela geraria flapping 4↔8); erros 429/5xx forçam backoff imediato +
+      cooldown (não induz 403/429 — reduz antes do limite).
+  - `src/transports/range.js` — pool dinâmico em `downloadParallelRanges`: rampa
+    2→4→8→12, backoff 0.5× com cooldown, respeito aos limites min/max e ao teto do
+    `concurrency`/chunkCount; workers por slot (bounded, sem TDZ); redução para
+    `id < desired` só para no fim do chunk atual (sem cancelamento no meio do stream).
+    Sem `smartTurbo` (ou `smartTurbo: false`) o pool é fixo — comportamento idêntico
+    ao anterior.
+  - Config e rollback: `smartTurbo` (boolean|objeto) em `config.json` e settings P7
+    (`src/cli/config.js`, `src/core/settings.js` — tipo `json` coerced); flag
+    `--no-smart-turbo` desliga por CLI; `runTurboDownloadFlow` repassa
+    `smartTurbo`/`onTurboDecision` e loga decisões up/down.
+  - Testes: `tests/unit/smart-turbo.test.js` (9), `tests/integration/
+    smart-turbo.test.js` (3 — servidor local com throttle token-bucket: download
+    íntegro + concurrency reduz + zero 403/429; servidor normal: rampa até o max;
+    rollback: pool fixo sem decisões), `tests/unit/config.test.js` e
+    `tests/unit/core-settings.test.js` (+5 de wiring). Baseline reproduzível:
+    `tests/performance/baseline-smart-turbo.mjs` (normal/throttle/latency × c=1..16 →
+    grava `BASELINE.md`).
+
+- **Resume para downloads compatíveis (P6.1, seção 13 do architect.md):** downloads
+  resumíveis **somente** em HTTP Range/direct com integridade garantível — HLS/DASH
+  ficam de fora por design (resume de HLS/DASH = re-exec do FFmpeg; fora do escopo de
+  chunks).
+  - `src/core/resume.js` — `DownloadState { url, destination, totalSize, etag,
+    lastModified, validators, chunks[] }` com escrita atômica: `createState`, `saveState`
+    (atomic: `writeFile .tmp` + `rename`; nunca lança), `loadState` (null se ausente/
+    corrompido/versão desconhecida), `clearState`, `validateState` (SIZE_CHANGED /
+    ETAG_CHANGED / LAST_MODIFIED_CHANGED / NO_VALIDATOR — nunca concatena dados se o
+    recurso mudou), `completedBytes`, `defaultStatePath` (`<destino>.resume.json`).
+  - `src/core/session.js` — `resolveResumeSession`: decisão `fresh | resume | discard |
+    error` + reanálise de URL expirada (`resolveFreshUrl`, no máximo 1 chamada — sem
+    loop): URL assinada expirada (403/EXPIRED_URL) → `onReanalyze` → novo probe na URL
+    renovada → valida ETag/Last-Modified/tamanho antes de retomar.
+  - `src/transports/range.js` — `downloadParallelRanges` com `resume=true` por default:
+    cria/valida o sidecar, retoma apenas chunks não concluídos (`r+`), descarta parcial
+    se o recurso mudou ou o parcial está ausente/divergente, remove o sidecar ao concluir;
+    correção de abort (bug do undici): `reader.cancel()` + checkpoints de
+    `signal.aborted` para interromper de verdade, gravações do sidecar serializadas
+    (evita corrupção por escrita concorrente no `.tmp`).
+  - `src/transports/http.js` — `detectAcceptRanges` também captura `etag`/`last-modified`
+    (validators usados pelo resume).
+  - `src/cli/turbo.js` — `runTurboDownloadFlow` passa `resume/onExpiredUrl/onResume`;
+    `cleanupResumeArtifacts` (parcial + sidecar); erro `other` preserva parcial + sidecar
+    para retomar na próxima execução; muxado usa `resume: false` (tmpDir efêmero).
+  - `src/cli-flow.js`, `src/cli/commands.js`, `src/cli/ui.js` — flag `--no-resume`
+    (rollback opt-in por job; interrupção descarta o parcial).
+  - `src/core/index.js` — re-exports de `resume.js` e `session.js`.
+  - 28 testes novos: `tests/unit/core-resume.test.js` (13), `tests/unit/
+    core-session.test.js` (11) e `tests/unit/transports-range-resume.test.js` (4:
+    interromper→retomar com hash idêntico; ETag novo → parcial descartado; `resume:false`
+    sem sidecar; URL expirada → reanálise única → retoma da URL nova). Smoke real
+    `smoke-p61.mjs` (removido após validar): kill duro no meio → retomar → hash idêntico
+    ao download limpo; `--no-resume` sem sidecar.
+
 - **CLI evoluída (P9):** subcomandos não-interativos `streamgrab analyze <url>` e
   `streamgrab download <url>` (seção 44 do architect.md), aditivos — o fluxo
   interativo atual (`streamgrab <url>` / `node src/index.js`) continua idêntico.

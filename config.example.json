@@ -10,5 +10,7 @@
   "cookiesFromBrowser": "",
   "_comentario_turbo": "Modo turbo: download paralelo por partes (HTTP Range) em URLs diretas (YouTube/sociais/arquivos). turbo=true liga por padrao; turboChunks define o numero de conexoes (padrao 8). Opcional.",
   "turbo": false,
-  "turboChunks": 8
+  "turboChunks": 8,
+  "_comentario_smart_turbo": "Smart Turbo (P6.2): concurrency adaptativa por benchmark. true liga com defaults (min 2, max 12, janela 1200ms) ou um objeto com opcoes { min, max, windowMs, perConnDropRatio, totalGainRatio, backoffFactor, cooldownWindows, rampUpSamples }. false/ausente = pool fixo (rollback). Requer turbo=true.",
+  "smartTurbo": false
 }

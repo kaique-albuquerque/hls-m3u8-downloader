@@ -9,6 +9,7 @@ import { parsePlaylistText } from '../src/hls.js';
 import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../src/mdstrm.js';
 import { resolveSourceAdapterAsync } from '../src/source-adapters.js';
 import { loadConfig } from '../src/cli/config.js';
+import { friendlyReport } from '../src/core/errors.js';
 import { normalizeMediaInfo } from './media-info.js';
 import {
   validateAnalyzePayload,
@@ -104,7 +105,7 @@ ipcMain.handle('app:show-in-folder', async (_event, payload) => {
   return { ok: true };
 });
 
-ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {
+async function analyzePlaylist(rawPayload) {
   // P8 (seção 24): validação da mensagem IPC antes de qualquer processamento.
   const payload = validateAnalyzePayload(rawPayload);
   if (!payload) {
@@ -168,6 +169,20 @@ ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {
     provider: adapter.label || adapter.id,
   });
   return { ...analysis, media };
+}
+
+ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {
+  // P11 (secao 42 — UX de falhas): falhas viram { ok: false, error: report }
+  // para a UI renderizar "Motivo / Acao sugerida / [Detalhes]".
+  try {
+    return await analyzePlaylist(rawPayload);
+  } catch (err) {
+    const report = friendlyReport(err);
+    if (!report.suggestedAction && report.code === 'INVALID_URL') {
+      report.suggestedAction = 'Informe uma URL completa, iniciando com http:// ou https://.';
+    }
+    return { ok: false, error: report };
+  }
 });
 
 ipcMain.handle('download:start', async (event, rawPayload) => {
@@ -175,7 +190,14 @@ ipcMain.handle('download:start', async (event, rawPayload) => {
   // processo (URL, taskId, filename sem traversal, outputDir absoluto).
   const payload = validateDownloadPayload(rawPayload);
   if (!payload) {
-    const result = { code: 1, ok: false, error: { message: 'Payload de download inválido.' } };
+    const result = {
+      code: 1,
+      ok: false,
+      error: {
+        message: 'Payload de download inválido.',
+        suggestedAction: 'Feche e reabra a aba ou reinicie o aplicativo e tente novamente.',
+      },
+    };
     event.sender.send('download:done', { taskId: rawPayload?.taskId || 'invalid', result });
     return result;
   }
@@ -235,10 +257,11 @@ ipcMain.handle('download:start', async (event, rawPayload) => {
     return result;
   } catch (err) {
     downloads.delete(taskId);
+    // P11 (secao 42): relatorio normalizado (Motivo / Acao sugerida / Detalhes).
     const result = {
       code: 1,
       ok: false,
-      error: { message: err?.message || String(err) },
+      error: friendlyReport(err),
       stderr: err?.stack || String(err),
     };
     sender.send('download:done', { taskId, result });

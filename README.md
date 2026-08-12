@@ -53,7 +53,7 @@ npm install
 
 > O programa em si **não usa dependências de runtime** — dá para rodar direto com `node src/index.js` sem `npm install`. O `npm install` instala apenas o **ntl** (menu opcional de scripts) como dependência de desenvolvimento. Exceção: para downloads do **YouTube** e de **redes sociais**, o `npm install` também baixa o binário standalone do **yt-dlp** (pacote `youtube-dl-exec`) na primeira instalação.
 
-> **Redes sociais:** além de YouTube, o adaptador social (motor yt-dlp) cobre **Facebook, Instagram, TikTok, X/Twitter, Reddit, Twitch, Vimeo, Dailymotion, LinkedIn, Bilibili, VK** e mais de 1.800 sites suportados pelo yt-dlp. Basta colar a URL do post/vídeo — o programa detecta a plataforma automaticamente e oferece as qualidades disponíveis. Conteúdo privado/login funciona com cookies (veja a seção [Conteúdo privado / autenticado](#-conteúdo-privado--autenticado-login)) e conteúdo com DRM não é suportado.
+> **Redes sociais:** além de YouTube, o adaptador social (motor yt-dlp) cobre **Facebook, Instagram, TikTok, X/Twitter, Reddit, Twitch, Vimeo, Dailymotion, LinkedIn, Bilibili, VK** e os demais sites suportados pelo yt-dlp (a lista muda com frequência — consulte a documentação do yt-dlp). Basta colar a URL do post/vídeo — o programa detecta a plataforma automaticamente e oferece as qualidades disponíveis. Conteúdo privado/login funciona com cookies (veja a seção [Conteúdo privado / autenticado](#-conteúdo-privado--autenticado-login)) e conteúdo com DRM não é suportado.
 
 ---
 
@@ -170,6 +170,26 @@ Funciona em **URLs diretas**: YouTube (progressivo e adaptativo — vídeo+áudi
 - Se o servidor **não suportar** download por partes (sem `Accept-Ranges`), o turbo detecta e **volta automaticamente** ao fluxo normal — sem erro.
 - Também pode ser ligado por padrão no `config.json`: `{ "turbo": true, "turboChunks": 8 }`.
 - No **Electron**, é uma caixa "⚡ Turbo" em cada aba.
+
+### 🧠 Smart Turbo (concurrency adaptativa)
+
+O **Smart Turbo** (P6.2) ajusta o número de conexões **durante** o download, orientado por benchmark (`tests/performance/BASELINE.md`): sobe em rampa (2→4→8→12) enquanto o throughput por conexão se mantém, e **reduz com backoff** ao detectar throttling (queda > 30% do por-conexão com total estagnado) ou erros 429/5xx — sem induzir bloqueios no servidor. Em links rápidos ele encontra o teto do seu link; em servidores limitados, para de desperdiçar conexões.
+
+```powershell
+node src/index.js --turbo --chunks 12            # pool fixo (comportamento anterior)
+node src/index.js --turbo --smart-turbo          # adaptativo (max 12)
+node src/index.js --turbo --no-smart-turbo       # rollback explícito por CLI
+```
+
+No `config.json`/settings:
+
+```jsonc
+{ "turbo": true, "turboChunks": 12, "smartTurbo": true }
+// ou com opções: { "smartTurbo": { "min": 2, "max": 8, "windowMs": 800 } }
+```
+
+- Padrão: **desligado** (pool fixo). `--no-smart-turbo` desliga mesmo com config ativa (rollback).
+- A cada janela de medição (default 1200 ms) o pool decide: subir (rampa/crescimento sustentado), reduzir (throttling/erros) ou manter.
 
 > 💡 Ganho típico: **2–10x** em conexões rápidas (o teto vira o seu link, não o throttling por conexão do servidor).
 
