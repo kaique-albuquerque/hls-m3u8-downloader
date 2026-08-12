@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getPackagedResourcesPath } from './core/binaries.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -29,6 +30,7 @@ function chromeVersion(profile) {
  * Localiza um binário do curl-impersonate instalado em:
  *  - PATH do sistema
  *  - pasta tools/ dentro do projeto
+ *  - <resourcesPath>/bin (produção empacotada, extraResources)
  *  - %LOCALAPPDATA%\curl-impersonate e %USERPROFILE%\curl-impersonate
  *
  * Formatos suportados:
@@ -44,6 +46,8 @@ export function findCurlImpersonate() {
     if (p.trim()) dirs.add(p.trim());
   }
   dirs.add(path.join(PROJECT_ROOT, 'tools'));
+  const packagedRoot = getPackagedResourcesPath();
+  if (packagedRoot) dirs.add(path.join(packagedRoot, 'bin'));
   if (process.env.LOCALAPPDATA) dirs.add(path.join(process.env.LOCALAPPDATA, 'curl-impersonate'));
   if (process.env.USERPROFILE) dirs.add(path.join(process.env.USERPROFILE, 'curl-impersonate'));
 

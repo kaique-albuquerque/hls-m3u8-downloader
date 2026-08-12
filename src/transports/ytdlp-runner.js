@@ -10,7 +10,7 @@
  * yt-dlp e os transports HTTP/Range/FFmpeg existentes.
  */
 
-import { youtubeDl } from 'youtube-dl-exec';
+import { getYtDlpExec } from '../core/binaries.js';
 import { YtDlpError, CancelledError } from '../core/errors.js';
 
 function toYtDlpError(err) {
@@ -53,7 +53,7 @@ export async function runYtDlpDownload({ url, formatId, output, headers = {}, au
 
   let promise;
   try {
-    promise = youtubeDl(url, options);
+    promise = (await getYtDlpExec())(url, options);
   } catch (err) {
     throw toYtDlpError(err);
   }

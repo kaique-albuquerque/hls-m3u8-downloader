@@ -1,4 +1,5 @@
-import { youtubeDl } from 'youtube-dl-exec';
+import { getYtDlpExec } from '../core/binaries.js';
+import { sleep } from '../core/retry.js';
 
 /**
  * Motor generico baseado no yt-dlp (via youtube-dl-exec, binario standalone,
@@ -10,6 +11,9 @@ import { youtubeDl } from 'youtube-dl-exec';
  * consumimos o dump JSON (URLs ja decifradas) e reaproveitamos o fluxo
  * existente de download/mux do projeto.
  */
+
+/** Tentativas máximas da análise quando o spawn do yt-dlp está bloqueado. */
+export const YTDLP_ANALYZE_MAX_ATTEMPTS = 3;
 
 export const YTDLP_FORMAT_UNAVAILABLE = 'YTDLP_FORMAT_UNAVAILABLE';
 
@@ -36,7 +40,7 @@ const LOGIN_REQUIRED_HINTS = [
   'forbidden',
 ];
 
-/** Detecta se o stderr do yt-dlp indica conteudo autenticado/restrito. */
+/** Detecta se o stderr do yt-dlp indica conteúdo autenticado/restrito. */
 export function isLoginRequiredError(stderr) {
   const text = String(stderr || '').toLowerCase();
   return LOGIN_REQUIRED_HINTS.some((hint) => text.includes(hint));
@@ -118,31 +122,76 @@ function mapYtDlpFormat(format) {
  * progressivos usam a URL direta (mesmo contrato de src/youtube.js).
  */
 export async function analyzeYtDlpUrl(url, headers = {}, auth = {}) {
-  let info;
-  try {
-    const userAgent = headers?.['user-agent'] || headers?.['User-Agent'];
-    const cookiesFile = auth?.cookiesFile || '';
-    const cookiesFromBrowser = auth?.cookiesFromBrowser || '';
-    info = await youtubeDl(url, {
-      ...buildBaseOptions(),
-      ...(userAgent ? { userAgent } : {}),
-      ...(cookiesFile ? { cookies: cookiesFile } : {}),
-      ...(cookiesFromBrowser ? { cookiesFromBrowser } : {}),
-    });
-  } catch (err) {
-    const stderr = String(err.stderr || err.message || '');
+  const userAgent = headers?.['user-agent'] || headers?.['User-Agent'];
+  const cookiesFile = auth?.cookiesFile || '';
+  const cookiesFromBrowser = auth?.cookiesFromBrowser || '';
+  const baseOptions = {
+    ...buildBaseOptions(),
+    ...(userAgent ? { userAgent } : {}),
+    ...(cookiesFile ? { cookies: cookiesFile } : {}),
+    ...(cookiesFromBrowser ? { cookiesFromBrowser } : {}),
+  };
+
+  // P10: o spawn do yt-dlp pode ser bloqueado temporariamente pelo Windows
+  // (Defender) na 1a execucao do binario recem-instalado — erro transitorio
+  // (EPERM/EBUSY/access denied) que desaparece em alguns segundos. Erros reais
+  // do yt-dlp (login, 403, formato) nao passam por retry.
+  let info = null;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= YTDLP_ANALYZE_MAX_ATTEMPTS; attempt++) {
+    try {
+      const exec = await getYtDlpExec();
+      info = await exec(url, baseOptions);
+      break;
+    } catch (err) {
+      lastErr = err;
+      const stderr = String(err.stderr || err.message || '');
+      if (!isSpawnBlockedError(stderr) || attempt === YTDLP_ANALYZE_MAX_ATTEMPTS) break;
+      await sleep(2000 * attempt);
+    }
+  }
+
+  if (!info) {
+    const stderr = String(lastErr.stderr || lastErr.message || '');
     const needsAuth = isLoginRequiredError(stderr);
+    const spawnBlocked = isSpawnBlockedError(stderr);
     const cause = new Error(
       needsAuth
-        ? `Conteudo autenticado/restrito: o yt-dlp nao conseguiu acessar sem login. Exporte os cookies do navegador (extensao "Get cookies.txt LOCALLY") e use --cookies <arquivo>, ou use --cookies-from-browser chrome/edge/firefox. Detalhes: ${err.message || String(err)}`
-        : `Nao foi possivel analisar o video com o yt-dlp: ${err.message || String(err)}`
+        ? `Conteudo autenticado/restrito: o yt-dlp nao conseguiu acessar sem login. Exporte os cookies do navegador (extensao "Get cookies.txt LOCALLY") e use --cookies <arquivo>, ou use --cookies-from-browser chrome/edge/firefox. Detalhes: ${lastErr.message || String(lastErr)}`
+        : spawnBlocked
+          ? `O Windows ainda esta verificando o yt-dlp (primeira execucao apos a instalacao). Aguarde alguns segundos e tente novamente. Detalhes: ${lastErr.message || String(lastErr)}`
+          : `Nao foi possivel analisar o video com o yt-dlp: ${lastErr.message || String(lastErr)}`
     );
     cause.code = 'YTDLP_ANALYZE_FAILED';
-    cause.stderr = err.stderr || '';
+    cause.stderr = lastErr.stderr || '';
     cause.needsAuth = needsAuth;
     throw cause;
   }
 
+  return buildAnalysisFromInfo(info, url);
+}
+
+/** Padroes de stderr que indicam spawn bloqueado (Windows Defender na 1a execucao). */
+const SPAWN_BLOCKED_HINTS = [
+  'eperm',
+  'ebusy',
+  'eacces',
+  'eagain',
+  'emfile',
+  'enoent',
+  'access is denied',
+  '0xc0000135', // STATUS_DLL_NOT_FOUND
+  '0xc0000022', // STATUS_ACCESS_DENIED
+];
+
+/** true se o stderr indica spawn bloqueado/transitorio (nao erro do yt-dlp). */
+export function isSpawnBlockedError(stderr) {
+  const s = String(stderr || '').toLowerCase();
+  return SPAWN_BLOCKED_HINTS.some((hint) => s.includes(hint));
+}
+
+/** Monta a analise a partir do dump JSON bruto do yt-dlp. */
+function buildAnalysisFromInfo(info, url) {
   const rawFormats = Array.isArray(info?.formats) ? info.formats : [];
 
   const progressiveFormats = rawFormats

@@ -120,6 +120,8 @@ window.api.onDownloadDone(({ taskId, result }) => {
     appendLog(tab, 'Download concluido!');
     setActiveStep(tab, 'download');
     markAllPreviousAsDone(tab, 'download');
+    // P8 (seção 8, passo 10): arquivo concluído pode ser aberto/localizado.
+    if (tab.outputPath) tab.fields.revealRow.hidden = false;
     return;
   }
 
@@ -134,7 +136,7 @@ window.api.onDownloadDone(({ taskId, result }) => {
 newTabBtn.addEventListener('click', () => addTab());
 addTab();
 
-function addTab() {
+function addTab({ copyFrom } = {}) {
   const id = `tab-${counter++}`;
   const label = `Video ${counter - 1}`;
 
@@ -174,12 +176,32 @@ function addTab() {
     speedValue: panel.querySelector('[data-field="speedValue"]'),
     analyzeBtn: panel.querySelector('[data-action="analyze"]'),
     downloadBtn: panel.querySelector('[data-action="download"]'),
+    enqueueBtn: panel.querySelector('[data-action="enqueue"]'),
     cancelBtn: panel.querySelector('[data-action="cancel"]'),
     pickDirBtn: panel.querySelector('[data-action="pickDir"]'),
+    openFileBtn: panel.querySelector('[data-action="openFile"]'),
+    showInFolderBtn: panel.querySelector('[data-action="showInFolder"]'),
+    revealRow: panel.querySelector('[data-field="revealRow"]'),
+    metadata: panel.querySelector('[data-field="metadata"]'),
+    thumbnail: panel.querySelector('[data-field="thumbnail"]'),
+    metaTitle: panel.querySelector('[data-field="metaTitle"]'),
+    metaDuration: panel.querySelector('[data-field="metaDuration"]'),
+    metaProvider: panel.querySelector('[data-field="metaProvider"]'),
+    metaCodec: panel.querySelector('[data-field="metaCodec"]'),
+    metaBitrate: panel.querySelector('[data-field="metaBitrate"]'),
+    metaSize: panel.querySelector('[data-field="metaSize"]'),
     turbo: panel.querySelector('[data-field="turbo"]'),
   };
 
   fields.outputDir.value = defaultOutputDir;
+
+  // P8: "Adicionar à fila" copia URL/arquivo/pasta/turbo da aba origem.
+  if (copyFrom) {
+    fields.url.value = copyFrom.fields.url.value || '';
+    fields.filename.value = copyFrom.fields.filename.value || '';
+    fields.outputDir.value = copyFrom.fields.outputDir.value || defaultOutputDir;
+    if (copyFrom.fields.turbo?.checked) fields.turbo.checked = true;
+  }
 
   const state = {
     id,
@@ -193,6 +215,7 @@ function addTab() {
     qualities: [],
     sourceUrl: '',
     analysisBaseUrl: '',
+    media: null,
     busy: false,
     duration: 0,
     outputPath: '',
@@ -252,6 +275,7 @@ function addTab() {
     setActiveStep(state, 'url');
     markAllPreviousAsDone(state, 'url');
     resetProgress(state);
+    state.fields.revealRow.hidden = true;
     setStatus(state, 'Analisando playlist...');
     fields.modeLabel.textContent = 'Analise de playlist em andamento';
     fields.log.textContent = [
@@ -269,7 +293,9 @@ function addTab() {
     try {
       const info = await window.api.analyzePlaylist({ url, headers: {} });
       state.sourceUrl = url;
-      state.analysisBaseUrl = info.baseUrl || url;
+      state.analysisBaseUrl = info.baseUrl || info.media?.baseUrl || url;
+      state.media = info.media || null;
+      renderMediaInfo(state);
 
       if (info.kind === 'master' || info.kind === 'youtube' || info.kind === 'ytdlp') {
         state.qualities = info.variants;
@@ -322,75 +348,32 @@ function addTab() {
 
   fields.downloadBtn.addEventListener('click', async () => {
     if (state.busy) return;
+    await startDownloadInTab(state);
+  });
 
+  // P8 (seção 8, passo 8): "Adicionar à fila" — cria uma nova aba com os
+  // mesmos parâmetros e inicia o download nela, sem bloquear a aba atual.
+  fields.enqueueBtn.addEventListener('click', async () => {
+    if (state.busy) return;
     const url = fields.url.value.trim();
     if (!url) {
       setStatus(state, 'Nenhuma URL informada.');
       return;
     }
+    const next = addTab({ copyFrom: state });
+    await startDownloadInTab(next);
+    activateTab(next.id);
+  });
 
-    const outputDir = (fields.outputDir.value.trim() || defaultOutputDir || '').trim();
-    const baseName = sanitizeFilename(fields.filename.value.trim() || 'video');
-    const filename = ensureMp4(baseName);
-    const fullOutput = outputDir ? `${outputDir}\\${filename}` : filename;
-    const conflict = activeOutputs.get(fullOutput);
+  fields.openFileBtn.addEventListener('click', async () => {
+    if (!state.outputPath) return;
+    const { ok, error } = await window.api.openFile({ filePath: state.outputPath });
+    if (!ok) setStatus(state, `Nao foi possivel abrir o arquivo: ${error || 'erro desconhecido'}`);
+  });
 
-    if (conflict && conflict !== state.taskId) {
-      setStatus(state, 'Esse nome de arquivo ja esta sendo usado em outra aba.');
-      return;
-    }
-
-    if (!state.selectedQuality && state.qualities.length > 0) {
-      state.selectedVariantUri = state.qualities[0].uri;
-      state.selectedQuality = new URL(state.selectedVariantUri, state.analysisBaseUrl || url).toString();
-    }
-
-    const chosenQuality = state.qualities.find((q) => q.uri === state.selectedVariantUri);
-
-    state.outputPath = fullOutput;
-    activeOutputs.set(fullOutput, state.taskId);
-    refreshResolvedOutput(state);
-    resetProgress(state);
-    lockTab(state, true);
-    setActiveStep(state, 'download');
-    markAllPreviousAsDone(state, 'download');
-    state.fields.modeLabel.textContent = 'Modo automatico (fallback do CLI)';
-    setStatus(state, 'Iniciando download...');
-    fields.log.textContent = [
-      '==============================================',
-      'StreamGrab - HLS / DASH / YouTube / Redes sociais',
-      'via FFmpeg + curl-impersonate (opcional)',
-      '==============================================',
-      '',
-      'Verificando FFmpeg...',
-      'FFmpeg OK.',
-      '',
-      `URL reconhecida: ${url}`,
-      state.qualities.length
-        ? `Formato escolhido: ${chosenQuality?.resolution || state.selectedQuality || 'melhor disponivel'}`
-        : 'Playlist unica detectada.',
-      `Salvando em: ${fullOutput}`,
-      'Iniciando fluxo padrao do FFmpeg...',
-    ].join('\n');
-
-    await window.api.startDownload({
-      taskId: state.taskId,
-      url: state.sourceUrl || url,
-      filename: baseName,
-      outputDir,
-      qualityChoice: state.qualities.length
-        ? String(
-            Math.max(
-              1,
-              state.qualities.findIndex((q) => q.uri === state.selectedVariantUri) + 1 || 1
-            )
-          )
-        : '',
-      overwriteAction: 'overwrite',
-      overwriteNewName: '',
-      forceCurl: false,
-      turbo: fields.turbo?.checked === true,
-    });
+  fields.showInFolderBtn.addEventListener('click', async () => {
+    if (!state.outputPath) return;
+    await window.api.showInFolder({ filePath: state.outputPath });
   });
 
   fields.cancelBtn.addEventListener('click', async () => {
@@ -399,6 +382,7 @@ function addTab() {
     fields.modeLabel.textContent = 'Cancelado';
     appendLog(state, 'Operacao cancelada.');
     state.panel.classList.remove('downloading');
+    state.fields.revealRow.hidden = true;
     releaseOutput(state.outputPath, state.taskId);
     lockTab(state, false);
   });
@@ -441,6 +425,103 @@ function removeTab(id) {
     const nextId = tabs.keys().next().value;
     activateTab(nextId);
   }
+}
+
+function renderMediaInfo(state) {
+  const media = state.media;
+  const fields = state.fields;
+  if (!media) {
+    fields.metadata.hidden = true;
+    return;
+  }
+  fields.metadata.hidden = false;
+  fields.metaTitle.textContent = media.title || 'Video';
+  fields.metaDuration.textContent = media.durationLabel || '—';
+  const providerBits = [media.provider, media.protocol].filter(Boolean).join(' · ');
+  fields.metaProvider.textContent = providerBits || '—';
+  fields.metaCodec.textContent = [media.resolution, media.codecs].filter(Boolean).join(' · ') || '—';
+  fields.metaBitrate.textContent = media.bitrateLabel || '—';
+  fields.metaSize.textContent = media.estimatedSizeLabel || '—';
+  const thumb = fields.thumbnail;
+  if (media.thumbnail && /^https?:\/\//i.test(media.thumbnail)) {
+    thumb.src = media.thumbnail;
+    thumb.hidden = false;
+  } else {
+    thumb.removeAttribute('src');
+    thumb.hidden = true;
+  }
+}
+
+async function startDownloadInTab(state) {
+  const fields = state.fields;
+  const url = fields.url.value.trim();
+  if (!url) {
+    setStatus(state, 'Nenhuma URL informada.');
+    return;
+  }
+
+  const outputDir = (fields.outputDir.value.trim() || defaultOutputDir || '').trim();
+  const baseName = sanitizeFilename(fields.filename.value.trim() || 'video');
+  const filename = ensureMp4(baseName);
+  const fullOutput = outputDir ? `${outputDir}\\${filename}` : filename;
+  const conflict = activeOutputs.get(fullOutput);
+
+  if (conflict && conflict !== state.taskId) {
+    setStatus(state, 'Esse nome de arquivo ja esta sendo usado em outra aba.');
+    return;
+  }
+
+  if (!state.selectedQuality && state.qualities.length > 0) {
+    state.selectedVariantUri = state.qualities[0].uri;
+    state.selectedQuality = new URL(state.selectedVariantUri, state.analysisBaseUrl || url).toString();
+  }
+
+  const chosenQuality = state.qualities.find((q) => q.uri === state.selectedVariantUri);
+
+  state.outputPath = fullOutput;
+  activeOutputs.set(fullOutput, state.taskId);
+  refreshResolvedOutput(state);
+  resetProgress(state);
+  lockTab(state, true);
+  setActiveStep(state, 'download');
+  markAllPreviousAsDone(state, 'download');
+  state.fields.modeLabel.textContent = 'Modo automatico (fallback do CLI)';
+  setStatus(state, 'Iniciando download...');
+  fields.log.textContent = [
+    '==============================================',
+    'StreamGrab - HLS / DASH / YouTube / Redes sociais',
+    'via FFmpeg + curl-impersonate (opcional)',
+    '==============================================',
+    '',
+    'Verificando FFmpeg...',
+    'FFmpeg OK.',
+    '',
+    `URL reconhecida: ${url}`,
+    state.qualities.length
+      ? `Formato escolhido: ${chosenQuality?.resolution || state.selectedQuality || 'melhor disponivel'}`
+      : 'Playlist unica detectada.',
+    `Salvando em: ${fullOutput}`,
+    'Iniciando fluxo padrao do FFmpeg...',
+  ].join('\n');
+
+  await window.api.startDownload({
+    taskId: state.taskId,
+    url: state.sourceUrl || url,
+    filename: baseName,
+    outputDir,
+    qualityChoice: state.qualities.length
+      ? String(
+          Math.max(
+            1,
+            state.qualities.findIndex((q) => q.uri === state.selectedVariantUri) + 1 || 1
+          )
+        )
+      : '',
+    overwriteAction: 'overwrite',
+    overwriteNewName: '',
+    forceCurl: false,
+    turbo: fields.turbo?.checked === true,
+  });
 }
 
 function renderQualities(state, emptyLabel = 'Nenhuma URL analisada ainda.') {
@@ -512,6 +593,7 @@ function lockTab(state, busy) {
   state.busy = busy;
   state.fields.analyzeBtn.disabled = busy;
   state.fields.downloadBtn.disabled = busy;
+  state.fields.enqueueBtn.disabled = busy;
   state.fields.url.disabled = busy;
   state.fields.filename.disabled = busy;
   state.fields.outputDir.disabled = busy;

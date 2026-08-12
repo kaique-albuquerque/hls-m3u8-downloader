@@ -4,7 +4,13 @@
   "description": "Universal video downloader for HLS, DASH, YouTube and supported web platforms.",
   "type": "module",
   "main": "electron/main.js",
+  "bin": {
+    "streamgrab": "bin/streamgrab.mjs"
+  },
   "scripts": {
+    "streamgrab": "node bin/streamgrab.mjs",
+    "analyze": "node bin/streamgrab.mjs analyze",
+    "download": "node bin/streamgrab.mjs download",
     "download:curl": "node src/index.js --curl-impersonate",
     "download:youtube": "node src/index.js --youtube",
     "electron:dev": "electron .",
@@ -17,6 +23,12 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "ffmpeg:install": "node scripts/install-ffmpeg.mjs",
+    "pack:resources": "node scripts/package-resources.mjs",
+    "update:ytdlp": "node scripts/update-ytdlp.mjs",
+    "dist": "npm run pack:resources && electron-builder --win",
+    "dist:dir": "npm run pack:resources && electron-builder --win --dir",
+    "dist:linux": "npm run pack:resources && electron-builder --linux",
+    "release": "npm run dist && node scripts/checksums.mjs",
     "postinstall": "node scripts/install-ffmpeg.mjs && node scripts/install-electron.mjs"
   },
   "engines": {
@@ -39,6 +51,7 @@
   "license": "MIT",
   "devDependencies": {
     "electron": "^37.10.3",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.8.1",
     "ntl": "^5.1.0",
     "prettier": "^3.9.6"

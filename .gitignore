@@ -4,3 +4,6 @@ downloads.log
 *.log
 saida-test/
 vendor/
+build/
+dist/
+*.tmp

@@ -1,24 +1,40 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { RESOURCES_PATH_ENV } from '../src/core/binaries.js';
 import { runCliSession } from '../src/cli-flow.js';
 import { createCurlClient, findCurlImpersonate } from '../src/curlimp.js';
 import { parsePlaylistText } from '../src/hls.js';
-import {
-  extractMdstrmVideoId,
-  fetchMdstrmPlayerVars,
-  buildPlayerUrl,
-  isMdstrmUrl,
-  needsMdstrmRefresh,
-} from '../src/mdstrm.js';
+import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../src/mdstrm.js';
 import { resolveSourceAdapterAsync } from '../src/source-adapters.js';
 import { loadConfig } from '../src/cli/config.js';
+import { normalizeMediaInfo } from './media-info.js';
+import {
+  validateAnalyzePayload,
+  validateDownloadPayload,
+  validateCancelPayload,
+  validateRevealPayload,
+} from './security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
+// P10 (seção 7): em produção, os binários ficam em extraResources
+// (resourcesPath/bin) — o core puro lê apenas o ambiente (src/core/binaries.js).
+if (app.isPackaged && process.resourcesPath) {
+  process.env[RESOURCES_PATH_ENV] = process.resourcesPath;
+}
+
 const downloads = new Map();
+
+// Raízes permitidas para abrir/localizar arquivos (seção 24: impede path
+// traversal e abertura de arquivos arbitrários via IPC).
+const allowedRevealRoots = new Set();
+
+function registerRevealRoot(dir) {
+  if (typeof dir === 'string' && dir.trim()) allowedRevealRoots.add(dir.trim());
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -29,10 +45,12 @@ function createWindow() {
     backgroundColor: '#0a0f14',
     title: 'StreamGrab',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // P8 (seção 24): sandbox ativado — o preload é CommonJS (preload.cjs)
+      // e o renderer roda isolado, sem acesso ao Node.
+      sandbox: true,
     },
   });
 
@@ -56,67 +74,127 @@ ipcMain.handle('app:pick-output-dir', async () => {
     properties: ['openDirectory', 'createDirectory'],
   });
   if (result.canceled || !result.filePaths[0]) return null;
+  registerRevealRoot(result.filePaths[0]);
   return result.filePaths[0];
 });
 
 ipcMain.handle('app:resolve-paths', async () => {
+  const defaultDownloads = app.getPath('downloads');
+  registerRevealRoot(defaultDownloads);
+  registerRevealRoot(PROJECT_ROOT);
   return {
     projectRoot: PROJECT_ROOT,
-    defaultDownloads: app.getPath('downloads'),
+    defaultDownloads,
   };
 });
 
-ipcMain.handle('playlist:analyze', async (_event, { url, headers, auth }) => {
-  const adapter = await resolveSourceAdapterAsync(url, headers || {});
-  if (adapter.id === 'direct') return { kind: 'direct' };
-  if (adapter.id === 'dash') return await adapter.analyze({ url, headers: headers || {} });
-  if (adapter.id === 'youtube' || adapter.id === 'social') {
+// P8 (seção 24): abertura/localização de arquivos concluídos — restrita às
+// raízes registradas (pasta escolhida, Downloads padrão, projectRoot).
+ipcMain.handle('app:open-file', async (_event, payload) => {
+  const validated = validateRevealPayload(payload, [...allowedRevealRoots]);
+  if (!validated) return { ok: false, error: 'Caminho inválido ou fora das pastas permitidas.' };
+  const result = await shell.openPath(validated.filePath);
+  return result ? { ok: false, error: result } : { ok: true };
+});
+
+ipcMain.handle('app:show-in-folder', async (_event, payload) => {
+  const validated = validateRevealPayload(payload, [...allowedRevealRoots]);
+  if (!validated) return { ok: false, error: 'Caminho inválido ou fora das pastas permitidas.' };
+  shell.showItemInFolder(validated.filePath);
+  return { ok: true };
+});
+
+ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {
+  // P8 (seção 24): validação da mensagem IPC antes de qualquer processamento.
+  const payload = validateAnalyzePayload(rawPayload);
+  if (!payload) {
+    const err = new Error('URL inválida. Informe uma URL http/https.');
+    err.code = 'INVALID_URL';
+    throw err;
+  }
+  const { url, headers, auth } = payload;
+
+  const adapter = await resolveSourceAdapterAsync(url, headers);
+  let analysis;
+  if (adapter.id === 'direct') {
+    analysis = { kind: 'direct', totalDuration: 0 };
+  } else if (adapter.id === 'dash') {
+    analysis = await adapter.analyze({ url, headers });
+  } else if (adapter.id === 'youtube' || adapter.id === 'social') {
     const config = loadConfig(PROJECT_ROOT, { log: () => {} });
     const mergedAuth = {
       cookiesFile: auth?.cookiesFile || config.cookiesFile || '',
       cookiesFromBrowser: auth?.cookiesFromBrowser || config.cookiesFromBrowser || '',
     };
-    return await adapter.analyze({ url, headers: headers || {}, auth: mergedAuth });
-  }
-  if (adapter.id === 'unknown') return await adapter.analyze({ url, headers: headers || {} });
+    analysis = await adapter.analyze({ url, headers, auth: mergedAuth });
+  } else if (adapter.id === 'unknown') {
+    analysis = await adapter.analyze({ url, headers });
+  } else {
+    let workingUrl = url;
+    const found = findCurlImpersonate();
 
-  let workingUrl = url;
-  const found = findCurlImpersonate();
+    // mdstrm: URL crua do CDN (tokens presos à sessão do player) dá 403 para
+    // qualquer cliente. Converte para a URL do player usando o embed público —
+    // funciona SEM curl-impersonate (fetch nativo); com curl, usa o cliente
+    // para imitar o TLS quando o CDN exige navegador real.
+    if (isMdstrmUrl(url) && needsMdstrmRefresh(url)) {
+      const videoId = extractMdstrmVideoId(url);
+      if (videoId) {
+        const client = found ? createCurlClient({ cmd: found.cmd, headers, profile: found.profile }) : null;
+        try {
+          workingUrl = await refreshMdstrmUrl(url, client);
+        } catch {
+          // embed público indisponível — segue com a URL original
+        }
+      }
+    }
 
-  if (isMdstrmUrl(url) && needsMdstrmRefresh(url) && found) {
-    const videoId = extractMdstrmVideoId(url);
-    if (videoId) {
-      const client = createCurlClient({ cmd: found.cmd, headers: headers || {}, profile: found.profile });
-      const vars = await fetchMdstrmPlayerVars(videoId, client);
-      workingUrl = buildPlayerUrl(videoId, vars);
+    try {
+      analysis = await adapter.analyze({ url: workingUrl, headers });
+    } catch (err) {
+      if (err?.status !== 403 || !found) throw err;
+
+      const client = createCurlClient({ cmd: found.cmd, headers, profile: found.profile });
+      const { text, finalUrl } = await client.getText(workingUrl);
+      analysis = parsePlaylistText(text, finalUrl || url);
     }
   }
 
-  try {
-    return await adapter.analyze({ url: workingUrl, headers: headers || {} });
-  } catch (err) {
-    if (err?.status !== 403 || !found) throw err;
-
-    const client = createCurlClient({ cmd: found.cmd, headers: headers || {}, profile: found.profile });
-    const { text, finalUrl } = await client.getText(workingUrl);
-    return parsePlaylistText(text, finalUrl || url);
-  }
+  // P8 (seção 8/9): resposta normalizada para a UI + shape legado preservado.
+  const media = normalizeMediaInfo(analysis, {
+    url,
+    baseUrl: analysis.baseUrl || url,
+    sourceType: adapter.id === 'youtube' ? 'youtube' : adapter.id === 'social' ? 'social' : analysis.sourceType || adapter.id,
+    provider: adapter.label || adapter.id,
+  });
+  return { ...analysis, media };
 });
 
-ipcMain.handle('download:start', async (event, payload) => {
+ipcMain.handle('download:start', async (event, rawPayload) => {
+  // P8 (seção 24): validação completa do payload antes de iniciar qualquer
+  // processo (URL, taskId, filename sem traversal, outputDir absoluto).
+  const payload = validateDownloadPayload(rawPayload);
+  if (!payload) {
+    const result = { code: 1, ok: false, error: { message: 'Payload de download inválido.' } };
+    event.sender.send('download:done', { taskId: rawPayload?.taskId || 'invalid', result });
+    return result;
+  }
+
   const {
     taskId,
     url,
-    filename = 'video',
-    outputDir = '',
-    qualityChoice = '',
-    overwriteAction = 'overwrite',
-    overwriteNewName = '',
-    forceCurl = false,
-    cookiesFile = '',
-    cookiesFromBrowser = '',
-    turbo = false,
+    filename,
+    outputDir,
+    qualityChoice,
+    overwriteAction,
+    overwriteNewName,
+    forceCurl,
+    turbo,
+    cookiesFile,
+    cookiesFromBrowser,
   } = payload;
+
+  if (outputDir) registerRevealRoot(outputDir);
 
   const sender = event.sender;
   const previous = downloads.get(taskId);
@@ -168,10 +246,12 @@ ipcMain.handle('download:start', async (event, payload) => {
   }
 });
 
-ipcMain.handle('download:cancel', async (_event, { taskId }) => {
-  const task = downloads.get(taskId);
+ipcMain.handle('download:cancel', async (_event, rawPayload) => {
+  const payload = validateCancelPayload(rawPayload);
+  if (!payload) return false;
+  const task = downloads.get(payload.taskId);
   task?.cancel?.();
-  downloads.delete(taskId);
+  downloads.delete(payload.taskId);
   return true;
 });
 

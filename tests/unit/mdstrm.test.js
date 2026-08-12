@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isMdstrmUrl, extractMdstrmVideoId, needsMdstrmRefresh, buildPlayerUrl } from '../../src/mdstrm.js';
+import { isMdstrmUrl, extractMdstrmVideoId, needsMdstrmRefresh, buildPlayerUrl, refreshMdstrmUrl } from '../../src/mdstrm.js';
 
 const CDN_URL =
   'https://us-b4-p-e-qg12.cdn.mdstrm.com/video/h/5e6f83ae335cdd1163e16b5b/6a03573096d73ba91827573a_6a03573096d73ba91827574b.mp4/index-v1-a1.m3u8?cP=2063000&pid=abc&sid=def&uid=ghi';
@@ -44,4 +44,50 @@ test('mdstrm buildPlayerUrl: monta URL do player com variaveis', () => {
   assert.ok(url.includes('sid=s'));
   assert.ok(url.includes('pid=p'));
   assert.ok(url.includes('av=v7.0.86'));
+});
+
+// ---- refreshMdstrmUrl ----
+test('mdstrm refreshMdstrmUrl: converte CDN cru usando client getText', async () => {
+  const fakeClient = {
+    getText: async (embedUrl) => {
+      assert.equal(embedUrl, EMBED_URL, 'client deve buscar o embed publico');
+      return {
+        text:
+          'window.MDSTRMUID="u";window.MDSTRMSID="s";window.MDSTRMPID="p";window.VERSION="v9";',
+      };
+    },
+  };
+  const refreshed = await refreshMdstrmUrl(CDN_URL, fakeClient);
+  assert.ok(refreshed.startsWith('https://mdstrm.com/video/6a03573096d73ba91827573a.m3u8?'), `URL do player (${refreshed})`);
+  assert.ok(refreshed.includes('uid=u') && refreshed.includes('sid=s') && refreshed.includes('pid=p') && refreshed.includes('av=v9'), `vars aplicadas (${refreshed})`);
+});
+
+test('mdstrm refreshMdstrmUrl: usa fetch nativo quando client ausente', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (embedUrl) => {
+    assert.equal(embedUrl, EMBED_URL, 'fetch nativo deve buscar o embed publico');
+    return {
+      ok: true,
+      status: 200,
+      text: async () => 'window.MDSTRMUID="u2";window.MDSTRMSID="s2";window.MDSTRMPID="p2";window.VERSION="v10";',
+    };
+  };
+  try {
+    const refreshed = await refreshMdstrmUrl(CDN_URL);
+    assert.ok(refreshed.includes('uid=u2') && refreshed.includes('av=v10'), `vars aplicadas via fetch (${refreshed})`);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('mdstrm refreshMdstrmUrl: player completo e URL de outra plataforma ficam como estao', async () => {
+  assert.equal(await refreshMdstrmUrl(PLAYER_URL), PLAYER_URL, 'player completo nao muda');
+  assert.equal(await refreshMdstrmUrl('https://example.com/x.m3u8'), 'https://example.com/x.m3u8', 'URL estranha nao muda');
+});
+
+test('mdstrm refreshMdstrmUrl: lanca quando o embed nao expoe as variaveis', async () => {
+  const fakeClient = {
+    getText: async () => ({ text: '<html>sem variaveis</html>' }),
+  };
+  await assert.rejects(() => refreshMdstrmUrl(CDN_URL, fakeClient), /vari[áa]veis do player/);
 });

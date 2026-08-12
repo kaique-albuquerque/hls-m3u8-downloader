@@ -64,13 +64,29 @@ export function buildPlayerUrl(videoId, { uid, sid, pid, version }) {
 /**
  * Busca as variáveis do player na página pública do embed.
  *
- * client = cliente criado por createCurlClient() (do curlimp.js), para imitar o TLS.
+ * client opcional = cliente criado por createCurlClient() (do curlimp.js), para
+ * imitar o TLS quando o CDN exige navegador real. Sem client, usa fetch nativo
+ * do Node (o embed é público e funciona com um GET simples).
  *
  * Retorna { uid, sid, pid, version } ou lança erro se não encontrar.
  */
 export async function fetchMdstrmPlayerVars(videoId, client) {
   const embedUrl = `https://mdstrm.com/embed/${videoId}`;
-  const { text } = await client.getText(embedUrl, { timeoutMs: 30000 });
+  let text;
+  if (client?.getText) {
+    ({ text } = await client.getText(embedUrl, { timeoutMs: 30000 }));
+  } else {
+    const res = await fetch(embedUrl, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+      err.status = res.status;
+      throw err;
+    }
+    text = await res.text();
+  }
   const grab = (re) => {
     const m = text.match(re);
     return m ? m[1] : '';
@@ -85,4 +101,22 @@ export async function fetchMdstrmPlayerVars(videoId, client) {
     throw new Error(`variáveis do player não encontradas no embed de ${videoId}`);
   }
   return vars;
+}
+
+/**
+ * Converte URLs da Media Stream que precisam de refresh para a URL do player.
+ *
+ * - URL crua do CDN ou player sem vars → busca as variáveis no embed público e
+ *   monta a URL do player (tokens frescos, funciona sem curl-impersonate).
+ * - URL do player completa ou URL de outra plataforma → retorna como está.
+ *
+ * client opcional = cliente com getText() (ex.: CurlImpersonateTransport).
+ */
+export async function refreshMdstrmUrl(url, client) {
+  const s = String(url || '');
+  if (!needsMdstrmRefresh(s)) return s;
+  const videoId = extractMdstrmVideoId(s);
+  if (!videoId) return s;
+  const vars = await fetchMdstrmPlayerVars(videoId, client);
+  return buildPlayerUrl(videoId, vars);
 }

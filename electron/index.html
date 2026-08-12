@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- P8 (seção 24): CSP restritiva — só recursos locais; imagens https
+         (thumbnails de providers) e data: são permitidas para a UI. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    />
     <title>StreamGrab</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -124,6 +130,7 @@
               <div class="action-row">
                 <button data-action="analyze" class="button button-primary" type="button">Analisar playlist</button>
                 <button data-action="download" class="button button-accent" type="button">Baixar agora</button>
+                <button data-action="enqueue" class="button button-ghost" type="button">Adicionar à fila</button>
                 <button data-action="cancel" class="button button-ghost" type="button">Cancelar</button>
               </div>
             </div>
@@ -133,6 +140,39 @@
             <div class="section-heading">Qualidades encontradas</div>
             <div class="hint-line">Mesmo comportamento do CLI: se você não escolher nada, usamos a melhor disponível.</div>
             <div data-field="qualities" class="qualities empty">Nenhuma URL analisada ainda.</div>
+          </section>
+
+          <section class="card metadata-card" data-field="metadata" hidden>
+            <div class="section-heading">Informações do vídeo</div>
+            <div class="media-meta">
+              <img data-field="thumbnail" class="thumb" alt="" hidden />
+              <div class="meta-grid">
+                <div class="meta-item">
+                  <span class="meta-label">Título</span>
+                  <strong data-field="metaTitle" class="meta-value">—</strong>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">Duração</span>
+                  <strong data-field="metaDuration" class="meta-value">—</strong>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">Provider / Protocolo</span>
+                  <strong data-field="metaProvider" class="meta-value">—</strong>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">Resolução / Codec</span>
+                  <strong data-field="metaCodec" class="meta-value">—</strong>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">Bitrate</span>
+                  <strong data-field="metaBitrate" class="meta-value">—</strong>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">Tamanho estimado</span>
+                  <strong data-field="metaSize" class="meta-value">—</strong>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section class="card progress-card">
@@ -164,6 +204,11 @@
             </div>
 
             <pre data-field="log" class="log"></pre>
+
+            <div class="reveal-row" data-field="revealRow" hidden>
+              <button data-action="openFile" class="button button-ghost" type="button">Abrir arquivo</button>
+              <button data-action="showInFolder" class="button button-ghost" type="button">Mostrar na pasta</button>
+            </div>
           </section>
         </div>
       </section>

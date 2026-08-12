@@ -1,0 +1,33 @@
+# P10 — CI essencial (seção 30 do architect.md)
+# Roda em PRs e pushes para main: install → lint → testes → build unpacked.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test + build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências (postinstall baixa FFmpeg/Electron/yt-dlp)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes (unit + integração + E2E)
+        run: npm test
+
+      - name: Build unpacked (valida empacotamento e binários)
+        run: npm run dist:dir

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeHeaders } from '../utils.js';
+import { createSettingsStore, DEFAULT_SETTINGS } from '../core/settings.js';
 
 export function loadConfig(projectRoot, io) {
   const configPath = path.join(projectRoot, 'config.json');
@@ -21,6 +22,34 @@ export function loadConfig(projectRoot, io) {
     io.log(`[AVISO] config.json invalido: ${err.message}`);
   }
   return { headers: {}, cookiesFile: '', cookiesFromBrowser: '', turbo: false, turboChunks: 8 };
+}
+
+/**
+ * P7 — Funde o config.json legado com os settings persistidos (settings.js).
+ *
+ * Regra: settings P7 vencem sobre o config.json legado (config.json e
+ * tratado como default antigo). `io` opcional para avisos; `settingsFile`
+ * opcional (testes). Retorna o objeto loadConfig + `settings` (store P7).
+ */
+export function mergeConfigWithSettings({ projectRoot, io = { log() {} }, settingsFile }) {
+  const legacy = loadConfig(projectRoot, io);
+  const file = settingsFile || path.join(projectRoot, 'streamgrab.settings.json');
+  const settings = createSettingsStore({ file });
+  const merged = { ...legacy };
+
+  const st = settings.all();
+  merged.turbo = st.turbo;
+  merged.turboChunks = st.turboChunks;
+  merged.defaultDir = st.defaultDir || '';
+  merged.maxConcurrentDownloads = st.maxConcurrentDownloads;
+  merged.defaultQuality = st.defaultQuality;
+  merged.audio = st.audio;
+  merged.notifications = st.notifications;
+  merged.onComplete = st.onComplete;
+  merged.historyRetentionDays = st.historyRetentionDays;
+  merged.settings = settings;
+  merged.defaults = { ...DEFAULT_SETTINGS };
+  return merged;
 }
 
 export function parseCliHeaders(argv) {

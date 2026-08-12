@@ -42,7 +42,7 @@ export function printStderrTail(io, result, url) {
   }
 }
 
-export async function runDownloadFlow(ctx, { url, output, headers, extraArgs = [], totalBytes, durationMs, label }) {
+export async function runDownloadFlow(ctx, { url, output, headers, extraArgs = [], outputArgs = [], totalBytes, durationMs, label }) {
   let lastResult = null;
 
   for (let modeIndex = 0; modeIndex < MODE_LABELS.length; modeIndex++) {
@@ -55,6 +55,7 @@ export async function runDownloadFlow(ctx, { url, output, headers, extraArgs = [
       headers,
       modeIndex,
       extraArgs,
+      outputArgs,
       onProgress: progress.update,
     });
 

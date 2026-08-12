@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createStreamGrabCore } from './core/index.js';
 import { checkFfmpeg } from './ffmpeg.js';
 import { fetchPlaylist } from './hls.js';
+import { needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from './mdstrm.js';
 import { resolveSourceAdapter, resolveSourceAdapterAsync } from './source-adapters.js';
 import {
   normalizeUrl,
@@ -117,11 +118,30 @@ export async function runCliSession({
       rawUrl = clip;
     }
   }
-  const url = normalizeUrl(rawUrl);
+  let url = normalizeUrl(rawUrl);
   if (!url) {
     safeIo.error('\n[ERRO] Nenhuma URL informada.');
     return { code: 1, ok: false };
   }
+
+  // mdstrm: URL crua do CDN (tokens presos à sessão do player) dá 403 para
+  // qualquer cliente — converte para a URL do player usando o embed público.
+  if (needsMdstrmRefresh(url)) {
+    const videoId = extractMdstrmVideoId(url);
+    if (videoId) {
+      safeIo.log(`\n[mdstrm] URL da Media Stream detectada (videoId ${videoId}).`);
+      safeIo.log('[mdstrm] Buscando credenciais do player no embed publico...');
+      try {
+        const refreshed = await refreshMdstrmUrl(url);
+        safeIo.log(`[mdstrm] URL do player gerada: ${maskUrl(refreshed)}`);
+        url = refreshed;
+      } catch (err) {
+        safeIo.log(`[mdstrm] Nao foi possivel converter: ${err.message}`);
+        safeIo.log('[mdstrm] Continuando com a URL original.');
+      }
+    }
+  }
+
   let adapter = forceYouTube && sourceLooksLikeYouTubeWatch(url)
     ? resolveSourceAdapter('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
     : await resolveSourceAdapterAsync(url, headers);

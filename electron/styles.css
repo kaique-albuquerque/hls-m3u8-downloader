@@ -539,6 +539,71 @@ body[data-theme="light"] .log {
   color: #1f3a4d;
 }
 
+/* P8 — metadados do vídeo (título, thumbnail, duração, provider, codecs) */
+.media-meta {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.thumb {
+  flex: 0 0 200px;
+  width: 200px;
+  max-height: 112px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.meta-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-item .meta-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.meta-item .meta-value {
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* P8 — abrir arquivo / mostrar na pasta */
+.reveal-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+@media (max-width: 820px) {
+  .media-meta {
+    flex-direction: column;
+  }
+
+  .thumb {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .meta-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1120px) {
   .panel.active {
     grid-template-columns: 1fr;

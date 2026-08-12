@@ -42,14 +42,15 @@ export function formatHeaders(headers) {
 /**
  * Monta os args de um download/remux via FFmpeg. Puro (sem I/O) — testável.
  * `extraArgs` (ex.: ['-allowed_extensions', 'ALL']) entram antes do -i,
- * pois são opções de entrada do demuxer HLS.
+ * pois são opções de entrada do demuxer HLS. `outputArgs` (ex.: ['-vn']) são
+ * opções de saída e entram depois do -i, antes dos args do modo.
  */
-export function buildDownloadArgs({ url, output, headers = {}, modeIndex = 0, extraArgs = [] }) {
+export function buildDownloadArgs({ url, output, headers = {}, modeIndex = 0, extraArgs = [], outputArgs = [] }) {
   const mode = MODES[modeIndex] || MODES[0];
   const headerStr = formatHeaders(headers);
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-y'];
   if (headerStr) args.push('-headers', headerStr);
-  args.push(...extraArgs, '-i', url, '-progress', 'pipe:1', ...mode.args, output);
+  args.push(...extraArgs, '-i', url, '-progress', 'pipe:1', ...outputArgs, ...mode.args, output);
   return args;
 }
 
@@ -76,10 +77,10 @@ export function buildMuxArgs({ videoInput, audioInput, output }) {
  * Baixa/remuxa via FFmpeg com fallback de modos (copy → adtstoasc → aac).
  * Contrato legado preservado: retorna { promise, stop, mode } síncrono.
  */
-export function startDownload({ url, output, headers = {}, modeIndex = 0, onProgress, extraArgs = [], signal } = {}) {
+export function startDownload({ url, output, headers = {}, modeIndex = 0, onProgress, extraArgs = [], outputArgs = [], signal } = {}) {
   const mode = MODES[modeIndex] || MODES[0];
   const { promise, stop } = ffmpegService.run({
-    args: buildDownloadArgs({ url, output, headers, modeIndex, extraArgs }),
+    args: buildDownloadArgs({ url, output, headers, modeIndex, extraArgs, outputArgs }),
     onProgress,
     signal,
   });

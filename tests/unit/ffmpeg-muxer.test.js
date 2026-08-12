@@ -70,6 +70,19 @@ test('muxer: buildDownloadArgs injeta headers e extraArgs antes do -i', () => {
   assert.deepEqual(args.slice(-5), ['-c', 'copy', '-bsf:a', 'aac_adtstoasc', 'o.mp4']);
 });
 
+test('muxer: buildDownloadArgs outputArgs entram depois do -i (P9 audio-only)', () => {
+  const args = buildDownloadArgs({
+    url: 'u.m3u8',
+    output: 'o.mp4',
+    outputArgs: ['-vn', '-c:a', 'copy'],
+  });
+  const iIdx = args.indexOf('-i');
+  assert.ok(iIdx >= 0, 'deve conter -i');
+  assert.ok(args.indexOf('-vn') > iIdx, '-vn depois do -i (opcao de saida)');
+  assert.ok(args.indexOf('-c:a') > iIdx, '-c:a depois do -i');
+  assert.deepEqual(args.slice(-6), ['-vn', '-c:a', 'copy', '-c', 'copy', 'o.mp4']);
+});
+
 test('muxer: buildDownloadArgs modo aac e fallback de modeIndex invalido', () => {
   const aac = buildDownloadArgs({ url: 'u', output: 'o', modeIndex: 2 });
   assert.ok(aac.includes('-c:a') && aac.includes('aac') && aac.includes('+faststart'));

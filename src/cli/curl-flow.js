@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { CurlImpersonateTransport, rewritePlaylist as _rewritePlaylist, extForUri as _extForUri } from '../transports/curl.js';
 import { parsePlaylistText } from '../hls.js';
-import { fetchMdstrmPlayerVars, isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, buildPlayerUrl } from '../mdstrm.js';
+import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../mdstrm.js';
 import { formatBytes, maskUrl } from '../utils.js';
 import { runDownloadFlow } from './download.js';
 import { chooseVariant, print403, printCurlImpHelp } from './ui.js';
@@ -27,8 +27,7 @@ export async function runCurlDownloadFlow(ctx, { ask, url, output, headers }) {
       ctx.io.log(`\n[mdstrm] URL da Media Stream detectada (videoId ${videoId}).`);
       ctx.io.log('[mdstrm] Buscando credenciais do player no embed publico...');
       try {
-        const vars = await fetchMdstrmPlayerVars(videoId, transport.client);
-        workingUrl = buildPlayerUrl(videoId, vars);
+        workingUrl = await refreshMdstrmUrl(url, transport.client);
         ctx.io.log(`[mdstrm] URL do player gerada: ${maskUrl(workingUrl)}`);
       } catch (err) {
         ctx.io.log(`[mdstrm] Nao foi possivel converter: ${err.message}`);

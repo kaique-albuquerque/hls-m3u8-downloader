@@ -32,6 +32,7 @@ import {
 } from './models.js';
 import { classifyError, CancelledError } from './errors.js';
 import { resolveSafeFilename, nextAvailableName } from './filenames.js';
+import { estimateMuxSpace } from './disk.js';
 import { getDefaultDownloadsDir } from '../utils.js';
 import { resolveSourceAdapter, resolveSourceAdapterAsync } from '../source-adapters.js';
 import { startDownload, startMuxDownload } from '../ffmpeg.js';
@@ -72,7 +73,7 @@ export function createDefaultExecutor() {
       return adapter.prepareDownload({ url, analysis, selectedUrl, headers, auth });
     },
 
-    async run({ job, prepared, output, headers, mode, signal, onProgress }) {
+    async run({ job, prepared, output, headers, mode, signal, onProgress, atomic }) {
       const sourceType = job._sourceType || job.meta?.sourceType || '';
       if (prepared.strategy === 'mux') {
         return runMuxDownload(prepared, output, headers, signal, onProgress);
@@ -84,7 +85,7 @@ export function createDefaultExecutor() {
       if (sourceType === 'hls' || sourceType === 'dash') {
         return runFfmpegDownload(url, output, headers, signal, onProgress, sourceType, mode, Number(job.meta?.durationMs || 0));
       }
-      return runStreamDownload(url, output, headers, signal, onProgress);
+      return runStreamDownload(url, output, headers, signal, onProgress, atomic);
     },
   };
 }
@@ -106,10 +107,16 @@ function abortOutcome(signal, ok = false) {
   return isAbortReasonPause(signal.reason) ? { paused: true } : { cancelled: true };
 }
 
-async function runStreamDownload(url, output, headers, signal, onProgress) {
+async function runStreamDownload(url, output, headers, signal, onProgress, atomic) {
   const started = Date.now();
   let downloaded = 0;
   let total = 0;
+  // P7: download atomico opt-in — grava em `.part` e renomeia apos validacao.
+  let atomicFile = null;
+  if (atomic && typeof atomic.createAtomicFile === 'function') {
+    atomicFile = atomic.createAtomicFile({ dir: path.dirname(output), filename: path.basename(output) });
+    output = atomicFile.partPath;
+  }
   try {
     const res = await fetch(url, { headers, signal, redirect: 'follow' });
     if (!res.ok || !res.body) {
@@ -132,10 +139,20 @@ async function runStreamDownload(url, output, headers, signal, onProgress) {
     } finally {
       await fh.close().catch(() => {});
     }
-    if (signal?.aborted) return abortOutcome(signal);
+    if (signal?.aborted) {
+      if (atomicFile) await atomicFile.abort().catch(() => {});
+      return abortOutcome(signal);
+    }
+    if (atomicFile) {
+      await atomicFile.commit().catch(() => {});
+      if (!fs.existsSync(atomicFile.finalPath)) {
+        return { ok: false, code: 'ATOMIC_COMMIT_FAILED', error: 'Falha ao finalizar arquivo.' };
+      }
+    }
     onProgress?.({ ...progressUpdate(downloaded, total, started), percent: 100 });
     return { ok: true };
   } catch (err) {
+    if (atomicFile) await atomicFile.abort().catch(() => {});
     if (signal?.aborted) return abortOutcome(signal);
     return { ok: false, code: err?.code || 'DOWNLOAD_FAILED', error: err.message, status: err?.status };
   }
@@ -235,11 +252,16 @@ async function runMuxDownload(prepared, output, headers, signal, onProgress) {
  *  - resolveAdapter: deteccao de fonte (default: defaultResolveAdapter)
  */
 export class DownloadEngine {
-  constructor({ events = createEventBus(), executor = createDefaultExecutor(), progressThrottleMs = 80, resolveAdapter = defaultResolveAdapter } = {}) {
+  constructor({ events = createEventBus(), executor = createDefaultExecutor(), progressThrottleMs = 80, resolveAdapter = defaultResolveAdapter, settings = null, disk = null, history = null, atomic = null } = {}) {
     this.events = events;
     this.executor = executor;
     this.progressThrottleMs = progressThrottleMs;
     this.resolveAdapter = resolveAdapter;
+    // P7 — colaboradores opcionais (integração sem mudar o comportamento padrao):
+    this.settings = settings; // store com get('defaultDir')
+    this.disk = disk; // { check({ dir, requiredBytes, extraBytes }) }
+    this.history = history; // { add(entry) }
+    this.atomic = atomic; // { createAtomicFile({ dir, filename }) }
     this._jobs = new Map(); // id -> job (objeto de dominio, nao serializado)
     this._active = new Map(); // id -> { attempt: AbortController, resume: fn|null }
     this._id = 0;
@@ -283,9 +305,26 @@ export class DownloadEngine {
     return [...this._jobs.values()].filter((j) => isTerminalJobState(j.state)).map(serializeJob);
   }
 
+  /** Remove um job TERMINAL (completed/failed/cancelled). Job ativo lança. */
+  remove(id) {
+    const job = this._jobs.get(String(id));
+    if (!job) {
+      const err = new Error(`Job nao encontrado: ${id}`);
+      err.code = 'JOB_NOT_FOUND';
+      throw err;
+    }
+    if (!isTerminalJobState(job.state)) {
+      const err = new Error(`Job ${id} ainda nao terminou (${job.state}).`);
+      err.code = 'JOB_ACTIVE';
+      throw err;
+    }
+    this._jobs.delete(job.id);
+    return true;
+  }
+
   /** Cria um job `queued` na fila. Retorna o job serializado. */
-  enqueue(url, { title = '', meta = {} } = {}) {
-    const job = createDownloadJob({ id: this._nextId(), url, title, meta });
+  enqueue(url, { id, title = '', meta = {} } = {}) {
+    const job = createDownloadJob({ id: id || this._nextId(), url, title, meta });
     this._jobs.set(job.id, job);
     return serializeJob(job);
   }
@@ -353,8 +392,13 @@ export class DownloadEngine {
       job.meta.totalBytes = Number(prepared.totalBytes || 0);
       job.meta.durationMs = Number(prepared.durationMs || 0);
 
-      // 3) destino
-      const dir = destination || getDefaultDownloadsDir();
+      // 3) destino (settings.defaultDir como fallback; `destination` vence)
+      const dir = destination || this.settings?.get?.('defaultDir') || getDefaultDownloadsDir();
+      // espaco em disco antes de comecar (incl. temporario extra p/ mux)
+      if (this.disk && job.meta.totalBytes > 0) {
+        const extra = prepared.strategy === 'mux' ? Math.max(0, estimateMuxSpace(job.meta.totalBytes) - job.meta.totalBytes) : 0;
+        await this.disk.check({ dir, requiredBytes: job.meta.totalBytes, extraBytes: extra });
+      }
       const base = job.title || FALLBACK_TITLE;
       const ext = this._extensionFor(prepared);
       let output = resolveSafeFilename(base, { dir, ext });
@@ -363,6 +407,7 @@ export class DownloadEngine {
 
       // 4) downloading (loop pausa/retomada)
       transitionJob(job, 'downloading');
+      job._startedAt = Date.now();
       const onProgress = this._makeProgress(job);
 
       for (;;) {
@@ -382,6 +427,7 @@ export class DownloadEngine {
           mode,
           signal: attempt.signal,
           onProgress,
+          atomic: this.atomic,
         });
 
         if (result?.paused) {
@@ -406,21 +452,53 @@ export class DownloadEngine {
 
       // 5) completed
       transitionJob(job, 'completed');
+      job._downloadedAt = Date.now();
+      this._recordHistory(job, { status: 'completed' });
       this._emit('complete', { jobId: job.id, stage: 'completed', percent: 100, message: `Download concluido: ${job.meta.output}` });
     } catch (err) {
       const classified = classifyError(err);
       if (classified instanceof CancelledError) {
         transitionJob(job, 'cancelled', { error: classified });
         this._cleanupPartial(job.meta.output);
+        this._recordHistory(job, { status: 'cancelled' });
         this._emit('cancel', { jobId: job.id, stage: 'cancelled', message: 'Download cancelado.' });
         return;
       }
       transitionJob(job, 'failed', { error: classified });
       this._cleanupPartial(job.meta.output);
+      this._recordHistory(job, { status: 'failed' });
       this._emit('error', { jobId: job.id, stage: 'failed', message: classified.friendlyMessage || classified.message });
       throw classified;
     } finally {
       this._active.delete(job.id);
+    }
+  }
+
+  /** Registra o download no historico (se fornecido); nunca derruba o fluxo. */
+  _recordHistory(job, { status }) {
+    if (!this.history || typeof this.history.add !== 'function') return;
+    try {
+      let size = 0;
+      const out = job.meta?.output;
+      if (out && fs.existsSync(out)) {
+        try {
+          size = fs.statSync(out).size;
+        } catch {
+          size = 0;
+        }
+      }
+      this.history.add({
+        title: job.title || job.url,
+        url: job.url,
+        provider: job._sourceType || job.meta?.sourceType || '',
+        format: job.meta?.format || job.meta?.chosenFormat || '',
+        destination: job.meta?.output || '',
+        status,
+        size,
+        durationMs: job._startedAt ? Math.max(0, Date.now() - job._startedAt) : 0,
+      });
+    } catch {
+      /* historico nunca derruba o download */
     }
   }
 

@@ -33,11 +33,13 @@ export { createDefaultExecutor };
  *  - executor: transporte injetavel (default: createDefaultExecutor())
  *  - progressThrottleMs: intervalo minimo entre eventos de progresso
  *  - resolveAdapter: deteccao de fonte (default: defaultResolveAdapter)
+ *  - settings/disk/history/atomic: colaboradores P7 (opcionais, injetados no
+ *    DownloadEngine — sem mudar o comportamento quando ausentes)
  */
 export class StreamGrabCore {
-  constructor({ events = createEventBus(), executor = createDefaultExecutor(), progressThrottleMs = 80, resolveAdapter } = {}) {
+  constructor({ events = createEventBus(), executor = createDefaultExecutor(), progressThrottleMs = 80, resolveAdapter, settings, disk, history, atomic } = {}) {
     this.events = events;
-    this._engine = new DownloadEngine({ events, executor, progressThrottleMs, resolveAdapter });
+    this._engine = new DownloadEngine({ events, executor, progressThrottleMs, resolveAdapter, settings, disk, history, atomic });
   }
 
   // -- eventos --------------------------------------------------------------
@@ -104,6 +106,10 @@ export class StreamGrabCore {
 
   cancel(id) {
     return this._engine.cancel(id);
+  }
+
+  remove(id) {
+    return this._engine.remove(id);
   }
 
   dispose() {

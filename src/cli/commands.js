@@ -1,0 +1,351 @@
+/**
+ * P9 — Comandos da CLI evoluída (seção 44 do architect.md).
+ *
+ * Sintaxe aditiva (nada do legado muda):
+ *   streamgrab <url>                     fluxo interativo atual (compatibilidade)
+ *   streamgrab analyze <url> [--json]    análise não-interativa (stdin não usado)
+ *   streamgrab download <url> [opções]   download não-interativo (stdin não usado)
+ *
+ * Exit codes: 0 = ok, 1 = erro, 130 = cancelado (contrato da CLI).
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { createStreamGrabCore } from '../core/index.js';
+import { fetchPlaylist } from '../hls.js';
+import { resolveSourceAdapterAsync } from '../source-adapters.js';
+import {
+  normalizeUrl,
+  normalizeHeaders,
+  sanitizeFilename,
+  ensureMp4,
+  getDefaultDownloadsDir,
+} from '../utils.js';
+import { ADAPTIVE_URI_PREFIX } from '../adapters/ytdlp.js';
+import { loadConfig, parseCliHeaders, parseCliAuth } from './config.js';
+import { runCliSession } from '../cli-flow.js';
+import { runDownloadFlow } from './download.js';
+import { createContext } from './context.js';
+import { renderAnalysis, printAnalysisError } from './render.js';
+
+/** Detecta o subcomando: analyze | download | help | interactive (padrão). */
+export function parseCliCommand(argv = []) {
+  const first = argv[0];
+  if (first === 'analyze' || first === 'download') {
+    return { command: first, url: argv[1] || '', rest: argv.slice(2) };
+  }
+  // `help` literal abre a ajuda dos subcomandos; `--help`/`-h` continuam caindo
+  // no fluxo interativo (printUsage atual) para preservar compatibilidade.
+  if (first === 'help') {
+    return { command: 'help', url: '', rest: argv.slice(1) };
+  }
+  return { command: 'interactive', url: '', rest: argv };
+}
+
+/** Ajuda dos subcomandos (aditiva — o fluxo interativo mantém printUsage). */
+export function printSubcommandHelp(io) {
+  io.log('');
+  io.log('StreamGrab - CLI nao-interativa (P9)');
+  io.log('');
+  io.log('Uso:');
+  io.log('  streamgrab <url>                    Fluxo interativo (padrao)');
+  io.log('  streamgrab analyze <url> [--json]   Analisa a URL sem interacao');
+  io.log('  streamgrab download <url> [opcoes]  Baixa a URL sem interacao');
+  io.log('');
+  io.log('Opcoes do analyze:');
+  io.log('  --json                       Saida em JSON (machine-readable)');
+  io.log('  --cookies <arquivo>          cookies.txt (Netscape)');
+  io.log('  --cookies-from-browser <b>   Extrai cookies do navegador');
+  io.log('  --referer <url>              Header Referer');
+  io.log('  --user-agent <ua>            Header User-Agent');
+  io.log('');
+  io.log('Opcoes do download:');
+  io.log('  --output <dir>               Pasta de saida (padrao: Downloads)');
+  io.log('  --filename <nome>            Nome do arquivo (sem extensao)');
+  io.log('  --format <n|id>              Qualidade: indice 1..n ou formatId (ex.: 137)');
+  io.log('  --audio-only                 Baixa apenas o audio');
+  io.log('  --turbo                      Download paralelo por partes (URLs diretas)');
+  io.log('  --chunks <n>                 Conexoes do turbo (padrao: 8)');
+  io.log('  --cookies <arquivo>          cookies.txt (Netscape)');
+  io.log('  --cookies-from-browser <b>   Extrai cookies do navegador');
+  io.log('  --curl-impersonate           Forca o modo curl-impersonate para HLS');
+  io.log('  --referer <url>              Header Referer');
+  io.log('  --user-agent <ua>            Header User-Agent');
+  io.log('');
+}
+
+/** Flags do analyze. */
+export function parseAnalyzeFlags(rest = []) {
+  return {
+    json: rest.includes('--json'),
+    headers: parseCliHeaders(rest),
+    auth: parseCliAuth(rest),
+  };
+}
+
+/** Flags do download (valores escalares; flags booleanas). */
+export function parseDownloadFlags(rest = []) {
+  const flags = {
+    outputDir: '',
+    filename: '',
+    format: '',
+    audioOnly: false,
+    turbo: false,
+    chunks: 0,
+    forceCurl: false,
+    cookiesFile: '',
+    cookiesFromBrowser: '',
+    headers: {},
+  };
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    if (arg === '--output' || arg === '-o') flags.outputDir = rest[++i] || '';
+    else if (arg === '--filename') flags.filename = rest[++i] || '';
+    else if (arg === '--format' || arg === '-f') flags.format = rest[++i] || '';
+    else if (arg === '--audio-only') flags.audioOnly = true;
+    else if (arg === '--turbo') flags.turbo = true;
+    else if (arg === '--chunks') flags.chunks = Number(rest[++i]) || 0;
+    else if (arg === '--curl-impersonate' || arg === '--ci') flags.forceCurl = true;
+    else if (arg === '--cookies') flags.cookiesFile = rest[++i] || '';
+    else if (arg === '--cookies-from-browser') flags.cookiesFromBrowser = rest[++i] || '';
+  }
+  flags.headers = parseCliHeaders(rest);
+  return flags;
+}
+
+/**
+ * `streamgrab analyze <url>` — análise não-interativa.
+ * Retorna { code, ok, info?, sourceType? }.
+ */
+export async function runAnalyzeCommand({ url, projectRoot, io = console, flags = {} }) {
+  const target = normalizeUrl(url);
+  if (!target || !isValidHttpUrl(target)) {
+    io.error('\n[ERRO] URL invalida. Uso: streamgrab analyze <url>');
+    return { code: 1, ok: false };
+  }
+
+  const config = loadConfig(projectRoot, io);
+  const headers = normalizeHeaders({ ...config.headers, ...(flags.headers || {}) });
+  const auth = {
+    cookiesFile: flags.cookiesFile || config.cookiesFile || '',
+    cookiesFromBrowser: flags.cookiesFromBrowser || config.cookiesFromBrowser || '',
+  };
+
+  const core = createStreamGrabCore();
+  const adapter = await resolveSourceAdapterAsync(target, headers);
+  const sourceType = adapter.id;
+  if (sourceType === 'unknown') {
+    io.error('\n[ERRO] A URL nao parece ser uma fonte suportada.');
+    return { code: 1, ok: false, error: 'UNSUPPORTED_SOURCE' };
+  }
+
+  let info;
+  try {
+    if (sourceType === 'youtube' || sourceType === 'social') {
+      const analysis = await core.analyze(target, { headers, auth });
+      info = analysis.info;
+    } else if (sourceType === 'hls') {
+      info = await fetchPlaylist(target, headers);
+    } else if (sourceType === 'dash') {
+      info = await adapter.analyze({ url: target, headers });
+    } else {
+      info = { kind: 'direct', totalDuration: 0 };
+    }
+  } catch (err) {
+    printAnalysisError(io, err);
+    return { code: 1, ok: false, error: err };
+  }
+
+  renderAnalysis(io, { url: target, adapter, info, json: flags.json === true });
+  return { code: 0, ok: true, info, sourceType };
+}
+
+/**
+ * `streamgrab download <url>` — download não-interativo.
+ * Delega ao runCliSession (mesmo fluxo do Electron) com respostas
+ * pré-preenchidas; `--audio-only` usa um fluxo dedicado (extração de áudio).
+ */
+export async function runDownloadCommand({ url, projectRoot, io = console, options = {} }) {
+  const target = normalizeUrl(url);
+  if (!target || !isValidHttpUrl(target)) {
+    io.error('\n[ERRO] URL invalida. Uso: streamgrab download <url>');
+    return { code: 1, ok: false };
+  }
+
+  const config = loadConfig(projectRoot, io);
+  const headers = normalizeHeaders({ ...config.headers, ...(options.headers || {}) });
+  const auth = {
+    cookiesFile: options.cookiesFile || config.cookiesFile || '',
+    cookiesFromBrowser: options.cookiesFromBrowser || config.cookiesFromBrowser || '',
+  };
+
+  if (options.audioOnly) {
+    return runAudioOnlyFlow({ target, io, headers, auth, options });
+  }
+
+  // --format <n|id>: resolve o índice da variante antes de montar as respostas.
+  let qualityChoice = '';
+  if (options.format) {
+    const resolved = await resolveQualityChoice({ target, headers, auth, format: options.format, io });
+    if (resolved.error) return { code: 1, ok: false, error: resolved.error };
+    qualityChoice = resolved.qualityChoice;
+  }
+
+  const answers = createNonInteractiveAnswers({ url: target, filename: options.filename, outputDir: options.outputDir, qualityChoice, forceCurl: options.forceCurl });
+  const argv = buildDownloadArgv({ options, auth });
+
+  return runCliSession({ argv, projectRoot, ask: answers.ask, io });
+}
+
+/** Respostas pré-preenchidas (mesmo contrato do answerBook do Electron). */
+export function createNonInteractiveAnswers({ url, filename = '', outputDir = '', qualityChoice = '', forceCurl = false }) {
+  const baseName = filename ? sanitizeFilename(filename) : 'video';
+  return {
+    async ask(question) {
+      if (question.includes('URL do video/playlist')) return String(url || '');
+      if (question.includes('Escolha (Enter = melhor disponivel)')) return String(qualityChoice || '');
+      if (question.includes('Nome do arquivo')) return baseName;
+      if (question.includes('Pasta de saida')) return String(outputDir || '');
+      if (question.includes('(S)obrescrever, (N)ovo nome, (C)ancelar?')) return 'S';
+      if (question.includes('Tentar contornar com curl-impersonate')) return forceCurl ? 'S' : '';
+      return '';
+    },
+  };
+}
+
+/** Monta o argv repassado ao fluxo interativo (flags de download). */
+export function buildDownloadArgv({ options = {}, auth = {} }) {
+  const argv = [];
+  if (options.turbo) argv.push('--turbo');
+  if (options.chunks > 0) argv.push('--chunks', String(options.chunks));
+  if (options.forceCurl) argv.push('--curl-impersonate');
+  if (auth.cookiesFile) argv.push('--cookies', auth.cookiesFile);
+  if (auth.cookiesFromBrowser) argv.push('--cookies-from-browser', auth.cookiesFromBrowser);
+  return argv;
+}
+
+/**
+ * Resolve `--format <n|id>` no índice 1-based das variantes:
+ *   - formatId / uri `ytdlp-format:<id>` / itag / altura / bandwidth → análise
+ *     prévia e match por id (mais específico);
+ *   - número inteiro dentro do range → usado como índice 1-based.
+ */
+export async function resolveQualityChoice({ target, headers, auth = {}, format = '', io = console }) {
+  if (!format) return { qualityChoice: '', error: null };
+
+  const core = createStreamGrabCore();
+  const adapter = await resolveSourceAdapterAsync(target, headers);
+  let info = null;
+  if (adapter.id === 'youtube' || adapter.id === 'social') {
+    const analysis = await core.analyze(target, { headers, auth });
+    info = analysis.info;
+  } else if (adapter.id === 'hls') {
+    info = await fetchPlaylist(target, headers);
+  }
+
+  const variants = info?.variants || [];
+
+  // 1) Match por id (formatId, ytdlp-format:<id>, itag, altura, bandwidth).
+  const byId = variants.findIndex((v) => {
+    if (v.formatId && String(v.formatId) === format) return true;
+    if (v.uri === `${ADAPTIVE_URI_PREFIX}${format}`) return true;
+    if (v.itag && String(v.itag) === format) return true;
+    if (v.height && String(v.height) === format) return true;
+    if (v.bandwidth && String(v.bandwidth) === format) return true;
+    return false;
+  });
+  if (byId !== -1) return { qualityChoice: String(byId + 1), error: null };
+
+  // 2) Índice 1-based (somente dentro do range de variantes).
+  const numeric = Number(format);
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= variants.length) {
+    return { qualityChoice: String(numeric), error: null };
+  }
+
+  io.error(`\n[ERRO] Formato "${format}" nao encontrado. Use um indice (1..${variants.length}) ou um formatId da analise.`);
+  return { qualityChoice: '', error: 'formato-nao-encontrado' };
+}
+
+/** Fluxo dedicado do `--audio-only` (não-interativo, reusa runDownloadFlow). */
+async function runAudioOnlyFlow({ target, io = console, headers, auth, options }) {
+  const core = createStreamGrabCore();
+  const adapter = await resolveSourceAdapterAsync(target, headers);
+  const sourceType = adapter.id;
+  if (sourceType === 'unknown') {
+    io.error('\n[ERRO] A URL nao parece ser uma fonte suportada.');
+    return { code: 1, ok: false, error: 'UNSUPPORTED_SOURCE' };
+  }
+
+  const filename = options.filename ? sanitizeFilename(options.filename) : 'audio';
+  const dir = options.outputDir ? path.resolve(options.outputDir) : getDefaultDownloadsDir();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    io.error(`\n[ERRO] Nao foi possivel usar a pasta "${dir}": ${err.message}`);
+    return { code: 1, ok: false };
+  }
+
+  const ctx = createContext(io);
+  let url = target;
+  let output;
+  let totalBytes;
+  let durationMs;
+  let outputArgs = [];
+
+  if (sourceType === 'youtube' || sourceType === 'social') {
+    let info;
+    try {
+      const analysis = await core.analyze(target, { headers, auth });
+      info = analysis.info;
+    } catch (err) {
+      printAnalysisError(io, err);
+      return { code: 1, ok: false, error: err };
+    }
+    const audio = info.adaptiveAudioFormats?.[0] || info.progressiveFormats?.[0];
+    if (!audio?.url) {
+      io.error('\n[ERRO] Nenhum audio encontrado para esta URL.');
+      return { code: 1, ok: false, error: 'sem-audio' };
+    }
+    url = audio.url;
+    const ext = audio.container || 'm4a';
+    output = path.join(dir, ensureExt(filename, ext));
+    totalBytes = audio.contentLength || undefined;
+    durationMs = (info.durationSeconds || 0) * 1000;
+    io.log(`\nExtraindo audio (${ext}, ${audio.qualityLabel || 'melhor disponivel'})...`);
+  } else {
+    // HLS / DASH / direto: o FFmpeg extrai o áudio com -vn (copy quando possível).
+    // outputArgs entram depois do -i (opções de saída).
+    output = path.join(dir, ensureMp4(filename));
+    outputArgs = ['-vn', '-c:a', 'copy'];
+    io.log('\nExtraindo audio (FFmpeg -vn -c:a copy)...');
+  }
+
+  const result = await runDownloadFlow(ctx, { url, output, headers, totalBytes, durationMs, outputArgs });
+  if (result.ok) {
+    io.log('\nDownload concluido!');
+    io.log(`Arquivo salvo em: ${output}`);
+    return { code: 0, ok: true, output };
+  }
+  if (result.interrupted) return { code: 130, ok: false, interrupted: true };
+  io.log('\nO download nao pode ser concluido. Revise a URL e tente novamente.');
+  return { code: 1, ok: false, error: result.error || 'falha' };
+}
+
+/** Valida se a string parece uma URL HTTP/HTTPS completa. */
+export function isValidHttpUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** Garante a extensão desejada (diferente do ensureMp4, que força .mp4). */
+export function ensureExt(name, ext) {
+  const safe = String(ext || '').replace(/^\./, '');
+  if (!safe) return name;
+  const re = new RegExp(`\\.${safe}$`, 'i');
+  return re.test(name) ? name : `${name}.${safe}`;
+}

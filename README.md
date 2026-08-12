@@ -406,6 +406,20 @@ npx ntl        # abre o menu; escolha download:curl
 nt             # reexecuta o último script escolhido
 ```
 
+### Empacotamento (instalador Windows)
+
+O instalador **StreamGrab-Setup-<versão>.exe** (NSIS) é gerado com o **electron-builder**. Os binários externos (FFmpeg de `vendor/ffmpeg/` — **incluindo as DLLs do build compartilhado**, yt-dlp do pacote `youtube-dl-exec` e, se presente, o curl-impersonate de `tools/`) são empacotados em `extraResources` (pastas `resources/bin/`) — em produção o app resolve os binários por `process.resourcesPath`, então a **máquina-alvo não precisa** de Node.js, FFmpeg ou yt-dlp instalados manualmente.
+
+```powershell
+npm run pack:resources   # copia os binários para build/extraResources/bin
+npm run dist             # gera dist/StreamGrab-Setup-<versão>.exe (Windows)
+npm run dist:dir         # build sem instalador (dist/win-unpacked) — para testar
+npm run release          # dist + checksums SHA-256 (dist/SHA256SUMS.txt)
+npm run update:ytdlp     # atualiza o binário do yt-dlp (todas as cópias locais)
+```
+
+> Requer `npm install` prévio (o `postinstall` baixa FFmpeg/Electron/yt-dlp). CI em PRs: `.github/workflows/ci.yml` (lint + testes + build). Release manual: empurre uma tag `v*` — `.github/workflows/release.yml` gera o instalador, checksums e publica a GitHub Release.
+
 ### Limitações (por design)
 
 - Não funciona com vídeos protegidos por DRM (Widevine/PlayReady) ou conteúdo criptografado.
@@ -701,6 +715,20 @@ npm install --save-dev ntl
 npx ntl        # opens the menu; choose download:curl
 nt             # re-runs the last chosen script
 ```
+
+### Building (Windows installer)
+
+The **StreamGrab-Setup-<version>.exe** installer (NSIS) is produced with **electron-builder**. External binaries (FFmpeg from `vendor/ffmpeg/` — **including the shared-build DLLs**, yt-dlp from the `youtube-dl-exec` package and, if present, curl-impersonate from `tools/`) are bundled into `extraResources` (`resources/bin/`) — in production the app resolves binaries via `process.resourcesPath`, so the **target machine does not need** Node.js, FFmpeg or yt-dlp installed manually.
+
+```powershell
+npm run pack:resources   # copies binaries into build/extraResources/bin
+npm run dist             # produces dist/StreamGrab-Setup-<version>.exe (Windows)
+npm run dist:dir         # unpacked build (dist/win-unpacked) — for testing
+npm run release          # dist + SHA-256 checksums (dist/SHA256SUMS.txt)
+npm run update:ytdlp     # updates the yt-dlp binary (all local copies)
+```
+
+> Requires `npm install` first (the `postinstall` downloads FFmpeg/Electron/yt-dlp). PR CI: `.github/workflows/ci.yml` (lint + tests + build). Manual release: push a `v*` tag — `.github/workflows/release.yml` builds the installer, checksums and publishes the GitHub Release.
 
 ### Limitations (by design)
 

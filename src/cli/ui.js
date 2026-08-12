@@ -13,7 +13,12 @@ export function printUsage(io) {
   io.log('');
   io.log('StreamGrab - HLS / DASH / Midia direta via FFmpeg');
   io.log('');
-  io.log('Uso:');
+  io.log('Uso (CLI evoluida, sem interacao):');
+  io.log('  streamgrab analyze <url> [--json]');
+  io.log('  streamgrab download <url> [--audio-only] [--output <dir>] [--format <id>] [--turbo]');
+  io.log('  streamgrab help');
+  io.log('');
+  io.log('Uso (interativo):');
   io.log('  npm start');
   io.log('  node src/index.js');
   io.log('  npm run download:curl');

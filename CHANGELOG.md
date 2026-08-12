@@ -9,6 +9,120 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 ## [Não publicado]
 
 ### Adicionado
+- **CLI evoluída (P9):** subcomandos não-interativos `streamgrab analyze <url>` e
+  `streamgrab download <url>` (seção 44 do architect.md), aditivos — o fluxo
+  interativo atual (`streamgrab <url>` / `node src/index.js`) continua idêntico.
+  - `bin/streamgrab.mjs` — entry point `streamgrab` (package.json `"bin"` + scripts
+    `streamgrab`/`analyze`/`download`).
+  - `src/cli/commands.js` — dispatch e implementação dos subcomandos: `parseCliCommand`,
+    `parseAnalyzeFlags`, `parseDownloadFlags`, `runAnalyzeCommand`, `runDownloadCommand`,
+    `resolveQualityChoice` (`--format <n|id>`), `createNonInteractiveAnswers`,
+    `runAudioOnlyFlow` (`--audio-only` com extração por FFmpeg).
+  - `src/cli/render.js` — saída de análise legível ou `--json` (`analysisToJson`,
+    `renderAnalysis`, `printAnalysisError`, `formatDuration`).
+  - `src/index.js` — parseia subcomandos sem quebrar chamadas atuais; `help` mostra a
+    ajuda dos subcomandos (o `--help` do fluxo interativo preserva o `printUsage`).
+  - Flags do download: `--audio-only`, `--format <n|id>`, `--output <dir>`,
+    `--filename <nome>`, `--turbo`, `--chunks <n>`, `--cookies <f>`,
+    `--cookies-from-browser <b>`, `--curl-impersonate`, `--referer`, `--user-agent`.
+  - Exit codes: 0 ok, 1 erro, 130 cancelado (Ctrl+C em `src/input.js`).
+  - `src/ffmpeg/muxer.js` + `src/cli/download.js`: novo parâmetro aditivo `outputArgs`
+    (opções de saída após o `-i`, ex.: `-vn` no `--audio-only`), sem quebrar `extraArgs`.
+  - 20 testes novos: `tests/unit/cli-commands.test.js` (19) + `ffmpeg-muxer.test.js`
+    (1 para `outputArgs`). Validado de ponta a ponta com servidor HLS local real
+    (analyze texto/JSON, download e `--audio-only`).
+- **Instalador Windows + CI/Releases essencial (P10):** `StreamGrab-Setup-<versão>.exe`
+  (NSIS) funcional em máquina Windows limpa (sem Node.js/FFmpeg/yt-dlp manuais) e CI
+  essencial em PRs (seções 7 e 30 do architect.md).
+  - `electron-builder.yml` — configuração do electron-builder: alvo Windows `nsis` (x64)
+    primeiro, `electronDist: node_modules/electron/dist` (reusa o Electron local, sem
+    re-download), `asar: true`, `extraResources` de `build/extraResources` para
+    `resources/` (FFmpeg, yt-dlp e curl-impersonate opcional em `bin/`).
+  - `src/core/binaries.js` — módulo puro (sem Electron) que resolve binários: em dev
+    usa as pastas do projeto; em produção lê `STREAMGRAB_RESOURCES_PATH` (definida por
+    `electron/main.js` quando `app.isPackaged`) e resolve em `<resourcesPath>/bin/`;
+    `getYtDlpExec()` usa `import()` dinâmico (compatível com `mock.module` nos testes)
+    e prefere `create(binárioEmpacotado)` quando disponível.
+  - `scripts/package-resources.mjs` — empacota FFmpeg (`vendor/ffmpeg/`), yt-dlp
+    (`youtube-dl-exec/bin/`) e perfis curl-impersonate (`tools/curl_*.bat`, opcional) em
+    `build/extraResources/bin`; falha com mensagem clara se um obrigatório estiver
+    ausente.
+  - `scripts/update-ytdlp.mjs` — atualiza o binário do yt-dlp a partir do GitHub
+    (latest release), valida a versão com `--version` e copia para todas as cópias
+    locais; erros de rede/versão viram mensagem clara + exit 1.
+  - `scripts/checksums.mjs` — gera `dist/SHA256SUMS.txt` (SHA-256 dos artefatos
+    `.exe|.blockmap|.yml`).
+  - `.github/workflows/ci.yml` — PRs/pushes para `main`: npm ci → lint → testes
+    (unit + integração + E2E) → `npm run dist:dir` (valida empacotamento).
+  - `.github/workflows/release.yml` — publicação manual/explícita: push de tag `v*`
+    roda testes, `npm run dist`, checksums e publica a GitHub Release com os artefatos.
+  - Scripts npm: `pack:resources`, `update:ytdlp`, `dist`, `dist:dir`, `dist:linux`,
+    `release`.
+  - Seção de empacotamento no README (PT-BR e EN). 16 testes unitários novos
+    (`tests/unit/binaries.test.js`, `package-resources.test.js`, `update-ytdlp.test.js`).
+  nodeIntegration, sandbox, preload mínimo, validação de IPC, shell/processos restritos,
+  path traversal, URLs não confiáveis, CSP).
+  - `electron/security.js` — módulo puro (sem Electron) que valida **todas** as mensagens
+    IPC do renderer: `isSafeHttpUrl` (somente http/https), `isValidTaskId`
+    (`/^[A-Za-z0-9_-]{1,64}$/`), `sanitizeDownloadFilename` (rejeita separadores e
+    traversal `..`; limpa caracteres inválidos do Windows), `isAbsolutePath`/`isSafeAbsolutePath`
+    (sem segmentos `..`), `validateAnalyzePayload`/`validateDownloadPayload`/
+    `validateCancelPayload` (payload limpo ou `null`) e `validateRevealPayload(payload,
+    allowedRoots)` — abertura de arquivo/pasta só dentro de raízes registradas
+    (diretório escolhido, Downloads padrão e raiz do projeto).
+  - `electron/media-info.js` — normalização do resultado dos providers em `MediaInfo`/
+    `Format` para a UI (seção 9): `formatDuration`, `estimateSizeBytes`,
+    `normalizeVariantToFormat` (HLS master/yt-dlp), `normalizeRepresentationToFormat`
+    (DASH) e `normalizeMediaInfo` (título, duração, thumbnail, provider, protocolo,
+    resolução, codecs, container, bitrate e tamanho estimado por formato).
+  - `electron/preload.cjs` — ponte mínima compatível com `sandbox: true` (CommonJS, sem
+    acesso ao Node no renderer): expõe apenas `analyzePlaylist`, `startDownload`,
+    `cancelDownload`, `pickOutputDir`, `resolvePaths`, `openFile`, `showInFolder` e
+    listeners de log/status/progresso/estado/conclusão.
+  - `electron/index.html` — CSP restritiva (`default-src 'none'`; script/style/imagens/
+    connect somente ao necessário; `form-action 'none'`; `frame-ancestors 'none'`), seção
+    de metadata (título, duração, provider/protocolo, codec/resolução, bitrate, tamanho
+    estimado, thumbnail), botões "Abrir arquivo"/"Mostrar na pasta" após conclusão e
+    botão "Adicionar à fila".
+  - IPC novos em `electron/main.js`: `app:open-file` e `app:show-in-folder` (via
+    `shell.openPath`/`shell.showItemInFolder`, restritos a raízes registradas).
+  - 30 testes unitários novos (`tests/unit/electron-security.test.js` e
+    `tests/unit/electron-media-info.test.js`).
+
+- **Queue, Settings, Histórico e Persistência (P7):** camada de estado persistente
+  (seções 10/12/21/22/46/37/38 do architect.md) com 6 módulos novos em `src/core/` e
+  re-exports na API pública (`src/core/index.js`).
+  - `src/core/storage.js` — persistência JSON com escrita atômica (`file.tmp` + `renameSync`;
+    crash no meio nunca corrompe o arquivo anterior), `readJsonSafe` tolerante a
+    corrompido/ausente e `createJsonStore` versionado (`{ version: 1 }`): merge tolerante
+    (campos conhecidos prevalecem do arquivo), downgrade seguro (campos de versão futura
+    ignorados; campos de versão anterior preservados) e `get/save/set/load/exists`.
+  - `src/core/settings.js` — preferências persistidas (seção 22): `DEFAULT_SETTINGS` com
+    `defaultDir`, `maxConcurrentDownloads [1,16]`, `turbo`, `turboChunks [1,32]`,
+    `defaultQuality`, `audio`, `notifications`, `theme`, `onComplete` e
+    `historyRetentionDays [0,3650]`; `normalizeSettings` ignora chaves desconhecidas e
+    coage/clampa tipos; `createSettingsStore` com `all/get/set/update/reset` (storage
+    injetável para testes).
+  - `src/core/history.js` — histórico local (seção 21): entradas com `id/title/url/provider/
+    format/destination/date/status/size/durationMs`, `createHistoryStore` com `add/list/get/
+    remove/clear/count`, `maxEntries` e `retentionDays` (prune no load; 0 = manter para
+    sempre). Privacidade: 100% local e controlável pelo usuário (remover/limpar).
+  - `src/core/queue.js` — fila de downloads (seção 10) sobre o `DownloadEngine`: limite de
+    simultâneos (`maxConcurrent`, clamp 1–16), auto-start até o limite, `pause/resume/cancel`
+    (job e fila), `retry` (re-enfileira a mesma URL com `meta.retryOf`), `remove`, `reorder`
+    (lança `QUEUE_BUSY` com downloads ativos, `INVALID_INDEX` com índices inválidos),
+    `getOutputPath` (abrir arquivo/pasta é responsabilidade da UI) e persistência com crash
+    recovery (`snapshot/restore/save/load` — jobs em andamento são revalidados como `queued`).
+  - `src/core/disk.js` — `getFreeBytes` via `fs.statfs` (null sem lançar), `checkDiskSpace`
+    com `DiskSpaceError` amigável (código `DISK_SPACE_ERROR`) incluindo temporário extra p/ mux
+    (`estimateMuxSpace` 2.2x + 50MB de margem).
+  - `src/core/atomic.js` — download atômico `.part` → rename com validação: `createAtomicFile`
+    (`write/commit/abort`, `EMPTY_PARTIAL` rejeita arquivo vazio), `moveIntoPlace` e
+    `cleanupPart`.
+  - 64 testes novos (`tests/unit/core-storage|settings|history|queue|disk-atomic|engine-p7`)
+    cobrindo: escrita atômica e crash simulado, downgrade seguro, clamps/coerção de settings,
+    retenção de histórico, limite de simultâneos, cancelar/retry/remover/reordenar,
+    crash recovery da fila e integração engine+settings+disk+history+atomic.
 - **FFmpegService e Áudio (P5):** `src/ffmpeg/` — serviço central de FFmpeg (seções 20/11 do
   architect.md) com detecção de binário (vendor/ffmpeg ou PATH), execução por spawn com args
   (nunca string montada), progresso por eventos (`-progress pipe:1` →
@@ -129,6 +243,34 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
 - Scripts npm: `test`, `test:unit`, `test:integration`, `test:e2e`, `lint`, `format`.
 
 ### Alterado
+- **Resolução de binários unificada (P10):** `src/ffmpeg/service.js` (ordem: empacotado
+  > `vendor/ffmpeg` > PATH), `src/curlimp.js` (inclui `<resourcesPath>/bin` na busca),
+  `src/adapters/ytdlp.js` e `src/transports/ytdlp-runner.js` (yt-dlp via
+  `getYtDlpExec()`) agora consomem `src/core/binaries.js`; `electron/main.js` define
+  `STREAMGRAB_RESOURCES_PATH` quando empacotado. `package.json` ganhou o script `dist*`/
+  `release` e a devDependency `electron-builder`.
+- **Electron com IPC validado e sandbox (P8):** `electron/main.js` valida toda mensagem
+  IPC recebida do renderer via `electron/security.js` (analyze/download/cancel/reveal);
+  `createWindow` passa a usar `sandbox: true` com `contextIsolation: true`,
+  `nodeIntegration: false` e preload CommonJS (`preload.cjs` — o antigo `preload.js`
+  ESM foi removido porque sandbox não suporta ESM no preload); `playlist:analyze` e
+  `download:start` retornam resposta normalizada por `media-info.js` (`media` com
+  `formats`/`best`/tamanho estimado). `electron/renderer.js` ganha `renderMediaInfo`,
+  `startDownloadInTab` (fluxo de download extraído do handler do botão), fila via novas
+  abas (`addTab({ copyFrom })` + botão "Adicionar à fila" — a UI nunca bloqueia durante
+  análise/download) e exibição dos botões de abrir/localizar ao concluir;
+  `electron/styles.css` adiciona estilos de metadata/thumbnail/reveal (responsivos).
+- **P7 — integração do estado persistente:** `src/core/engine.js` aceita colaboradores
+  opcionais `settings/disk/history/atomic` (regressão zero: sem eles o comportamento é o
+  mesmo da P5) — `defaultDir` dos settings vira fallback de destino, checagem de disco antes
+  de baixar (incl. temporário extra para mux), histórico registrado em completed/cancelled/
+  failed (nunca derruba o download), download direto via `.part` atômico quando `atomic`
+  presente, `enqueue` aceita `id` explícito (restauração de fila) e novo `remove(id)`
+  (somente jobs terminais; ativo lança `JOB_ACTIVE`). `src/core/registry.js` propaga as novas
+  opções e delega `remove`. `src/cli/config.js` ganha `mergeConfigWithSettings` (funde o
+  `config.json` legado com os settings persistidos — settings P7 vencem; gera
+  `streamgrab.settings.json`). `src/core/index.js` re-exporta storage/settings/history/queue/
+  disk/atomic.
 - **FFmpeg delegado ao muxer (P5):** `src/ffmpeg.js` virou re-export fino de
   `src/ffmpeg/{service,muxer,audio}.js` (contrato legado preservado — `checkFfmpeg`,
   `getFfmpegCommand`, `startDownload`, `startMuxDownload`, `MODES`/`MODE_LABELS`); a constante
@@ -161,6 +303,36 @@ arquitetônica (`0.1.x` — base; `1.0.0` — versão considerada estável).
   `smoke-speed.mjs` → `tests/e2e/smoke-speed.mjs`, `smoke-uvweb.mjs` → `tests/e2e/smoke-uvweb.mjs`.
 
 ### Corrigido
+- **m3u8 da Media Stream (mdstrm) retornava 403:** URLs cruas do CDN
+  (`*.cdn.mdstrm.com/.../index-v1-a1.m3u8`) copiadas do DevTools falham com 403 para
+  qualquer cliente, pois os tokens (pid/sid/uid/access_token) ficam presos à sessão do
+  player e expiram. O fluxo principal (`src/cli-flow.js`) e o IPC de análise do app
+  (`electron/main.js`, `playlist:analyze`) agora convertem automaticamente a URL crua
+  para a URL do player (`https://mdstrm.com/video/<id>.m3u8?...`) buscando as variáveis
+  no embed público (`refreshMdstrmUrl` em `src/mdstrm.js`) — funciona SEM
+  curl-impersonate (fetch nativo); com curl instalado, usa o cliente para imitar o TLS.
+  No `main.js` a conversão antes dependia do curl (`&& found`) — por isso o app
+  instalado continuava com 403. O `curl-flow.js` foi refatorado para usar o mesmo
+  helper. 4 testes unitários novos. Validado ao vivo: embed → URL do player → 200 OK.
+- **Binários não resolvidos em produção (P10, seção 7):** em máquina limpa (sem
+  Node/FFmpeg/yt-dlp manuais) o app empacotado não achava FFmpeg/yt-dlp/curl-impersonate
+  — agora os binários são empacotados em `extraResources` (`resources/bin/`) e resolvidos
+  via `process.resourcesPath`.
+- **Download falhava no instalador (P10):** o FFmpeg do `vendor/ffmpeg` (build
+  compartilhado do gyan.dev) depende das DLLs na mesma pasta (avcodec-63.dll,
+  avformat-63.dll etc.) — o empacotador copiava só o `ffmpeg.exe`, e o app instalado
+  falhava com `STATUS_DLL_NOT_FOUND` (0xC0000135) ao iniciar o download.
+  `scripts/package-resources.mjs` agora copia também as DLLs de `vendor/ffmpeg`
+  (campo `depsDir` + filtro `*.dll`). Validado com a suíte completa rodando com
+  `STREAMGRAB_RESOURCES_PATH` apontando para `dist/win-unpacked/resources`
+  (513 testes, E2E incluído).
+- **Segurança do Electron (P8, seção 24):** renderer tinha `sandbox: false` e recebia
+  mensagens IPC sem validação — agora sandbox ativado, todas as mensagens validadas
+  (URLs http/https, task ids restritos, nomes de arquivo sem traversal, outputs dentro de
+  raízes permitidas); abertura de arquivos/pasta era irrestrita — agora restrita a raízes
+  registradas; sem CSP — adicionada CSP restritiva; comandos já usavam `argv` estruturado
+  (nunca strings de shell com entrada do usuário) — mantido e reforçado pela validação de
+  payload.
 - Script `test` do `package.json` apontava para arquivo movido (quebrado) — atualizado.
 - Caso E2E "arquivo direto MP4": saída truncada (261 bytes) por `moov` no fim do arquivo
   sem suporte a Range no servidor local — geração do fixture agora usa `-movflags +faststart`.

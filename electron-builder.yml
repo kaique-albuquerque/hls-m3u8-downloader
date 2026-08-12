@@ -1,0 +1,47 @@
+# P10 — electron-builder (seções 7 e 30 do architect.md)
+# Instalador Windows NSIS: StreamGrab-Setup-<versão>.exe.
+# Binários de runtime (ffmpeg/yt-dlp/curl-impersonate) empacotados por
+# scripts/package-resources.mjs → extraResources → <app>/resources/bin.
+
+appId: com.streamgrab.app
+productName: StreamGrab
+copyright: Copyright © 2026 StreamGrab
+
+directories:
+  output: dist
+  buildResources: build
+
+# Usa o Electron já baixado pelo npm (evita re-download no cache do builder).
+electronDist: node_modules/electron/dist
+
+files:
+  - "electron/**"
+  - "src/**"
+  - "config.example.json"
+  # O binário do youtube-dl-exec fica de fora do asar — o app usa o yt-dlp
+  # empacotado em extraResources/bin (src/core/binaries.js em produção).
+  - "!node_modules/youtube-dl-exec/bin/**"
+
+extraResources:
+  - from: build/extraResources
+    to: .
+    filter:
+      - "**/*"
+
+asar: true
+compression: normal
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: StreamGrab-Setup-${version}.exe
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: StreamGrab
+  createDesktopShortcut: true
+  deleteAppDataOnUninstall: false

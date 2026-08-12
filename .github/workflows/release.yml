@@ -1,0 +1,47 @@
+# P10 — Release (seção 30 do architect.md)
+# Disparo MANUAL/explícito: empurrar uma tag v* cria o StreamGrab-Setup-<versão>.exe,
+# checksums e uma GitHub Release. Nunca automático sem tag.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build installer (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes
+        run: npm test
+
+      - name: Build instalador NSIS
+        run: npm run dist
+
+      - name: Checksums SHA-256
+        run: node scripts/checksums.mjs
+
+      - name: Publicar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.yml
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
