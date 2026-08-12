@@ -23,6 +23,10 @@ export const EVENT_NAMES = Object.freeze([
   'complete',
   'error',
   'cancel',
+  // P11.1: diagnostico sanitizado do engine (roteamento mdstrm, etc.) —
+  // a UI consome via queue:event e exibe no log do job; nunca contem
+  // tokens completos de sessao.
+  'log',
 ]);
 
 /** Alias conceituais do architect.md (secao 6): download:<nome>. */

@@ -85,8 +85,9 @@ app.whenReady().then(() => {
   });
 
   // Eventos do engine que a fila não re-emite: progresso, pausa/retomada,
-  // início do job, velocidade e ETA — mesmo canal `queue:event`.
-  for (const event of ['start', 'progress', 'speed', 'eta', 'pause', 'resume']) {
+  // início do job, velocidade, ETA e diagnóstico sanitizado — mesmo canal
+  // `queue:event`.
+  for (const event of ['start', 'progress', 'speed', 'eta', 'pause', 'resume', 'log']) {
     services.core.on(event, (payload) => broadcast(event, payload));
   }
 

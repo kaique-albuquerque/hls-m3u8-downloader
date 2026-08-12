@@ -683,6 +683,10 @@ function handleQueueEvent(event, payload) {
         syncMetrics(tab);
       }
       break;
+    case 'log':
+      // Diagnóstico sanitizado do engine (roteamento mdstrm, etc.).
+      if (tab && payload.message) appendLog(tab, payload.message);
+      break;
     case 'pause':
       if (tab) {
         tab.jobState = 'paused';

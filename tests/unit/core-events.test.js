@@ -21,6 +21,9 @@ test('core-events: nomes de eventos conforme o plano', () => {
     'complete',
     'error',
     'cancel',
+    // P11.1: diagnostico sanitizado (roteamento mdstrm etc.) — a UI exibe
+    // no log do job; nunca contem tokens completos de sessao.
+    'log',
   ]);
   assert.deepEqual(DOWNLOAD_EVENT_NAMES, EVENT_NAMES.map((n) => `download:${n}`));
   for (const name of EVENT_NAMES) assert.equal(isValidEventName(name), true);
