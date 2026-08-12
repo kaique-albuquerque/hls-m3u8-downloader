@@ -98,3 +98,37 @@ test('core-facade: HTTP 404 vira MediaNotFoundError e job falha com status', asy
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('core-facade: download envia User-Agent padrao (403 se ausente nao acontece)', async () => {
+  // P11.1: o fetch do Node nao envia User-Agent por padrao e varios CDNs/WAFs
+  // rejeitam com 403 requisicoes sem UA. O engine deve enviar o DEFAULT_USER_AGENT
+  // (como o FFmpeg no CLI sempre envia um) — servidor exige UA para servir.
+  const tmp = makeTempDir();
+  let seenUserAgent = null;
+  const { url, stop } = await startServer((req, res) => {
+    const ua = req.headers['user-agent'];
+    if (!ua) {
+      res.writeHead(403);
+      res.end('forbidden');
+      return;
+    }
+    seenUserAgent = ua;
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Content-Length': PAYLOAD.length,
+    });
+    res.end(PAYLOAD);
+  });
+  try {
+    const core = createStreamGrabCore({ progressThrottleMs: 0 });
+    const job = await core.download(url('/video.mp4'), { destination: tmp });
+
+    assert.equal(job.state, 'completed');
+    assert.ok(seenUserAgent, 'servidor deve ter recebido um User-Agent');
+    assert.ok(/Mozilla|StreamGrab/i.test(seenUserAgent), `UA inesperado: ${seenUserAgent}`);
+    assert.equal(fs.readFileSync(job.meta.output).toString(), PAYLOAD.toString());
+  } finally {
+    await stop();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -33,7 +33,7 @@ import {
 import { classifyError, CancelledError } from './errors.js';
 import { resolveSafeFilename, nextAvailableName } from './filenames.js';
 import { estimateMuxSpace } from './disk.js';
-import { getDefaultDownloadsDir } from '../utils.js';
+import { getDefaultDownloadsDir, normalizeHeaders, DEFAULT_USER_AGENT } from '../utils.js';
 import { resolveSourceAdapter, resolveSourceAdapterAsync } from '../source-adapters.js';
 import { startDownload, startMuxDownload } from '../ffmpeg.js';
 
@@ -118,7 +118,11 @@ async function runStreamDownload(url, output, headers, signal, onProgress, atomi
     output = atomicFile.partPath;
   }
   try {
-    const res = await fetch(url, { headers, signal, redirect: 'follow' });
+    // P11.1: o fetch do Node nao envia User-Agent por padrao; varios CDNs/WAFs
+    // rejeitam com 403 requisicoes sem UA. Mesmo padrao do CLI (FFmpeg sempre
+    // envia um) e do probe de content-type. Header do usuario vence o default.
+    const requestHeaders = normalizeHeaders({ 'User-Agent': DEFAULT_USER_AGENT, ...headers });
+    const res = await fetch(url, { headers: requestHeaders, signal, redirect: 'follow' });
     if (!res.ok || !res.body) {
       return { ok: false, code: 'HTTP_ERROR', error: `HTTP ${res.status}`, status: res.status };
     }

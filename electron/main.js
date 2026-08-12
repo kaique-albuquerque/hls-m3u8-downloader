@@ -8,6 +8,7 @@ import { parsePlaylistText } from '../src/hls.js';
 import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../src/mdstrm.js';
 import { resolveSourceAdapterAsync } from '../src/source-adapters.js';
 import { loadConfig } from '../src/cli/config.js';
+import { normalizeHeaders } from '../src/utils.js';
 import { friendlyReport } from '../src/core/errors.js';
 import { normalizeMediaInfo } from './media-info.js';
 import { createElectronServices } from './services.js';
@@ -154,21 +155,25 @@ async function analyzePlaylist(rawPayload) {
   }
   const { url, headers, auth } = payload;
 
-  const adapter = await resolveSourceAdapterAsync(url, headers);
+  // P11.1: o Electron agora le os headers do config.json (como o CLI) e os
+  // repassa para analise + download. Headers vindos do renderer vencem config.
+  const config = loadConfig(PROJECT_ROOT, { log: () => {} });
+  const mergedHeaders = normalizeHeaders({ ...config.headers, ...headers });
+
+  const adapter = await resolveSourceAdapterAsync(url, mergedHeaders);
   let analysis;
   if (adapter.id === 'direct') {
     analysis = { kind: 'direct', totalDuration: 0 };
   } else if (adapter.id === 'dash') {
-    analysis = await adapter.analyze({ url, headers });
+    analysis = await adapter.analyze({ url, headers: mergedHeaders });
   } else if (adapter.id === 'youtube' || adapter.id === 'social') {
-    const config = loadConfig(PROJECT_ROOT, { log: () => {} });
     const mergedAuth = {
       cookiesFile: auth?.cookiesFile || config.cookiesFile || '',
       cookiesFromBrowser: auth?.cookiesFromBrowser || config.cookiesFromBrowser || '',
     };
-    analysis = await adapter.analyze({ url, headers, auth: mergedAuth });
+    analysis = await adapter.analyze({ url, headers: mergedHeaders, auth: mergedAuth });
   } else if (adapter.id === 'unknown') {
-    analysis = await adapter.analyze({ url, headers });
+    analysis = await adapter.analyze({ url, headers: mergedHeaders });
   } else {
     let workingUrl = url;
     const found = findCurlImpersonate();
@@ -180,7 +185,7 @@ async function analyzePlaylist(rawPayload) {
     if (isMdstrmUrl(url) && needsMdstrmRefresh(url)) {
       const videoId = extractMdstrmVideoId(url);
       if (videoId) {
-        const client = found ? createCurlClient({ cmd: found.cmd, headers, profile: found.profile }) : null;
+        const client = found ? createCurlClient({ cmd: found.cmd, headers: mergedHeaders, profile: found.profile }) : null;
         try {
           workingUrl = await refreshMdstrmUrl(url, client);
         } catch {
@@ -190,11 +195,11 @@ async function analyzePlaylist(rawPayload) {
     }
 
     try {
-      analysis = await adapter.analyze({ url: workingUrl, headers });
+      analysis = await adapter.analyze({ url: workingUrl, headers: mergedHeaders });
     } catch (err) {
       if (err?.status !== 403 || !found) throw err;
 
-      const client = createCurlClient({ cmd: found.cmd, headers, profile: found.profile });
+      const client = createCurlClient({ cmd: found.cmd, headers: mergedHeaders, profile: found.profile });
       const { text, finalUrl } = await client.getText(workingUrl);
       analysis = parsePlaylistText(text, finalUrl || url);
     }
@@ -242,6 +247,10 @@ function enqueueDownload({ url, filename, outputDir, selectedUrl, title, turbo, 
   }
   if (outputDir) registerRevealRoot(outputDir);
 
+  // P11.1: headers do config.json (Referer/Origin/User-Agent) seguem para o
+  // download na fila — mesmo comportamento do CLI.
+  const config = loadConfig(PROJECT_ROOT, { log: () => {} });
+
   const job = services.queue.enqueue(url, {
     title: title || filename || '',
     meta: {
@@ -251,10 +260,10 @@ function enqueueDownload({ url, filename, outputDir, selectedUrl, title, turbo, 
       sourceUrl: url,
       taskId: taskId || '',
       turbo: Boolean(turbo),
-      headers: {},
+      headers: normalizeHeaders(config.headers),
       auth: {
-        cookiesFile: cookiesFile || '',
-        cookiesFromBrowser: cookiesFromBrowser || '',
+        cookiesFile: cookiesFile || config.cookiesFile || '',
+        cookiesFromBrowser: cookiesFromBrowser || config.cookiesFromBrowser || '',
       },
     },
   });

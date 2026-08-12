@@ -25,6 +25,14 @@ const CANONICAL_HEADERS = {
 };
 
 /**
+ * User-Agent padrao para requisicoes fetch.
+ * O fetch do Node (undici) nao envia User-Agent por padrao e varios CDNs/WAFs
+ * rejeitam com 403 requisicoes sem UA — mesmo comportamento do FFmpeg (que
+ * sempre envia um) e do probe de content-type.
+ */
+export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
+
+/**
  * Limpa a entrada colada pelo usuário:
  * - extrai a URL real de um link Markdown `[texto](url)`;
  * - remove aspas, colchetes e escapes acidentais de Markdown.
@@ -294,7 +302,7 @@ export async function probeMediaContentType(url, headers = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const hdrs = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', ...normalizeHeaders(headers) };
+    const hdrs = { 'User-Agent': DEFAULT_USER_AGENT, ...normalizeHeaders(headers) };
     let res = null;
     try {
       res = await fetch(url, { method: 'HEAD', headers: hdrs, redirect: 'follow', signal: controller.signal });
