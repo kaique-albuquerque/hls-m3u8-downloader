@@ -399,7 +399,10 @@ export class DownloadEngine {
         const extra = prepared.strategy === 'mux' ? Math.max(0, estimateMuxSpace(job.meta.totalBytes) - job.meta.totalBytes) : 0;
         await this.disk.check({ dir, requiredBytes: job.meta.totalBytes, extraBytes: extra });
       }
-      const base = job.title || FALLBACK_TITLE;
+      // nome do arquivo: P11 — o Electron pode definir `meta.filename`
+      // (a UI nao depende mais da simulacao de prompts do CLI); titulo da
+      // analise e o fallback, preservando o comportamento atual do CLI.
+      const base = job.meta?.filename || job.title || FALLBACK_TITLE;
       const ext = this._extensionFor(prepared);
       let output = resolveSafeFilename(base, { dir, ext });
       output = nextAvailableName(output);
@@ -454,7 +457,15 @@ export class DownloadEngine {
       transitionJob(job, 'completed');
       job._downloadedAt = Date.now();
       this._recordHistory(job, { status: 'completed' });
-      this._emit('complete', { jobId: job.id, stage: 'completed', percent: 100, message: `Download concluido: ${job.meta.output}` });
+      // P11: `output` no payload permite que a UI (Electron) habilite
+      // "Abrir arquivo / Mostrar na pasta" sem consultar a fila novamente.
+      this._emit('complete', {
+        jobId: job.id,
+        stage: 'completed',
+        percent: 100,
+        message: `Download concluido: ${job.meta.output}`,
+        output: job.meta.output || '',
+      });
     } catch (err) {
       const classified = classifyError(err);
       if (classified instanceof CancelledError) {
@@ -467,7 +478,17 @@ export class DownloadEngine {
       transitionJob(job, 'failed', { error: classified });
       this._cleanupPartial(job.meta.output);
       this._recordHistory(job, { status: 'failed' });
-      this._emit('error', { jobId: job.id, stage: 'failed', message: classified.friendlyMessage || classified.message });
+      // P11: payload enriquecido com os campos do relatorio amigavel
+      // (motivo / acao sugerida / detalhes) para a UI renderizar a secao 42.
+      this._emit('error', {
+        jobId: job.id,
+        stage: 'failed',
+        message: classified.friendlyMessage || classified.message,
+        code: classified.code || '',
+        suggestedAction: classified.suggestedAction || '',
+        detail: classified.detail || '',
+        status: classified.status || 0,
+      });
       throw classified;
     } finally {
       this._active.delete(job.id);

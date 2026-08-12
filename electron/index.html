@@ -25,6 +25,14 @@
           <p class="subtitle">Interface espelhando o fluxo do CLI, com as mesmas etapas e mensagens principais.</p>
         </div>
         <div class="topbar-actions">
+          <nav class="view-nav">
+            <button id="viewVideosBtn" class="button button-ghost view-btn active" type="button">Vídeos</button>
+            <button id="viewQueueBtn" class="button button-ghost view-btn" type="button">
+              Fila <span id="queueBadge" class="badge" hidden>0</span>
+            </button>
+            <button id="viewHistoryBtn" class="button button-ghost view-btn" type="button">Histórico</button>
+            <button id="viewSettingsBtn" class="button button-ghost view-btn" type="button">Configurações</button>
+          </nav>
           <label class="theme-toggle" for="themeToggle">
             <input id="themeToggle" type="checkbox" />
             <span data-theme-label>Modo escuro</span>
@@ -33,9 +41,115 @@
         </div>
       </header>
 
-      <nav id="tabBar" class="tabbar"></nav>
+      <div id="view-videos" class="view active">
+        <nav id="tabBar" class="tabbar"></nav>
+        <main id="tabPanels" class="panels"></main>
+      </div>
 
-      <main id="tabPanels" class="panels"></main>
+      <section id="view-queue" class="view" hidden>
+        <div class="view-header card">
+          <div>
+            <h2>Fila de downloads</h2>
+            <p class="hint-line" id="queueSummary">Carregando fila...</p>
+          </div>
+          <div class="view-actions">
+            <button id="queueTogglePauseBtn" class="button button-ghost" type="button">Pausar fila</button>
+            <button id="queueRefreshBtn" class="button button-ghost" type="button">Atualizar</button>
+          </div>
+        </div>
+        <div id="queueList" class="queue-list"></div>
+        <div id="queueEmpty" class="empty-state" hidden>Nenhum download na fila.</div>
+      </section>
+
+      <section id="view-history" class="view" hidden>
+        <div class="view-header card">
+          <div>
+            <h2>Histórico</h2>
+            <p class="hint-line" id="historySummary">Carregando histórico...</p>
+          </div>
+          <div class="view-actions">
+            <button id="historyClearBtn" class="button button-ghost" type="button">Limpar histórico</button>
+            <button id="historyRefreshBtn" class="button button-ghost" type="button">Atualizar</button>
+          </div>
+        </div>
+        <div id="historyList" class="queue-list"></div>
+        <div id="historyEmpty" class="empty-state" hidden>Nenhum download registrado ainda.</div>
+      </section>
+
+      <section id="view-settings" class="view" hidden>
+        <div class="view-header card">
+          <div>
+            <h2>Configurações</h2>
+            <p class="hint-line">Preferências persistidas em settings.json — aplicadas também ao CLI.</p>
+          </div>
+          <div class="view-actions">
+            <button id="settingsSaveBtn" class="button button-accent" type="button">Salvar</button>
+            <button id="settingsResetBtn" class="button button-ghost" type="button">Restaurar padrão</button>
+          </div>
+        </div>
+        <div class="card settings-form" id="settingsForm">
+          <label class="prompt">
+            <span class="prompt-title">Downloads simultâneos (1-16):</span>
+            <input data-setting="maxConcurrentDownloads" type="number" min="1" max="16" />
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Pasta padrão de saída (vazio = Downloads):</span>
+            <div class="inline-row">
+              <input data-setting="defaultDir" placeholder="Downloads" />
+              <button id="settingsPickDirBtn" class="button button-ghost" type="button">Escolher</button>
+            </div>
+          </label>
+          <label class="toggle">
+            <input data-setting="turbo" type="checkbox" />
+            <span>⚡ Turbo — download paralelo por partes (CLI; na fila o transporte é o engine padrão)</span>
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Chunks do Turbo (1-32):</span>
+            <input data-setting="turboChunks" type="number" min="1" max="32" />
+          </label>
+          <label class="toggle">
+            <input data-setting="smartTurbo" type="checkbox" />
+            <span>Smart Turbo — adapta o paralelismo por baseline</span>
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Qualidade padrão (Enter = melhor disponível):</span>
+            <input data-setting="defaultQuality" placeholder="best" />
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Áudio:</span>
+            <select data-setting="audio">
+              <option value="original">original</option>
+              <option value="m4a">m4a</option>
+              <option value="mp3">mp3</option>
+              <option value="aac">aac</option>
+              <option value="opus">opus</option>
+              <option value="flac">flac</option>
+              <option value="wav">wav</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input data-setting="notifications" type="checkbox" />
+            <span>Notificações de conclusão</span>
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Tema:</span>
+            <select data-setting="theme">
+              <option value="system">system</option>
+              <option value="light">light</option>
+              <option value="dark">dark</option>
+            </select>
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Comando ao concluir (opcional):</span>
+            <input data-setting="onComplete" placeholder="ex.: explorer /select," />
+          </label>
+          <label class="prompt">
+            <span class="prompt-title">Retenção do histórico em dias (0 = ilimitado):</span>
+            <input data-setting="historyRetentionDays" type="number" min="0" max="3650" />
+          </label>
+        </div>
+        <div data-field="settingsStatus" class="status settings-status"></div>
+      </section>
     </div>
 
     <template id="tabTemplate">

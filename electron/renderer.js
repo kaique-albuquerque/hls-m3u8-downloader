@@ -1,12 +1,3 @@
-const MODE_LABELS = {
-  'running:copy': 'Baixando - modo: copia direta (-c copy)',
-  'running:copy-adtstoasc': 'Baixando - modo: copia direta com correcao de audio (aac_adtstoasc)',
-  'running:aac': 'Baixando - modo: reconversao do audio para AAC (-c:a aac)',
-  'retrying:copy': 'Falha no modo copia direta. Tentando modo alternativo...',
-  'retrying:copy-adtstoasc': 'Falha no modo com aac_adtstoasc. Tentando modo alternativo...',
-  'retrying:aac': 'Falha no modo AAC.',
-};
-
 const STEP_ORDER = ['ffmpeg', 'url', 'variant', 'file', 'dir', 'download'];
 
 const tabBar = document.getElementById('tabBar');
@@ -32,109 +23,11 @@ window.api.resolvePaths().then(({ defaultDownloads }) => {
   }
 });
 
-window.api.onDownloadProgress((payload) => {
-  const tab = tabs.get(payload.taskId);
-  if (!tab) return;
-
-  lockTab(tab, true);
-  tab.panel.classList.add('downloading');
-  if (payload.duration) tab.duration = payload.duration;
-
-  if (payload.key === 'out_time') {
-    tab.metrics.time = payload.value;
-    const pct = tab.duration
-      ? Math.min(99, Math.floor((timeToSeconds(payload.value) / tab.duration) * 100))
-      : null;
-    if (pct !== null && Number.isFinite(pct)) {
-      tab.fields.progress.style.width = `${Math.max(1, pct)}%`;
-      tab.fields.percent.textContent = `${Math.max(1, pct)}%`;
-    }
-    setStatus(tab, `Baixando... Tempo: ${payload.value}`);
-  }
-
-  if (payload.key === 'total_size') {
-    tab.metrics.size = formatBytes(payload.value);
-  }
-
-  if (payload.key === 'speed') {
-    tab.metrics.speed = normalizeSpeed(payload.value);
-  }
-
-  if (payload.key === 'progress' && payload.value === 'end') {
-    tab.fields.progress.style.width = '100%';
-    tab.fields.percent.textContent = '100%';
-    tab.panel.classList.remove('downloading');
-    lockTab(tab, false, true);
-  }
-
-  syncMetrics(tab);
-  appendLog(tab, `${payload.key}=${payload.value}`);
-  setActiveStep(tab, 'download');
-});
-
-window.api.onDownloadLog(({ taskId, line }) => {
-  const tab = tabs.get(taskId);
-  if (!tab || !line) return;
-  appendLog(tab, line);
-});
-
-window.api.onDownloadStatus(({ taskId, text }) => {
-  const tab = tabs.get(taskId);
-  if (!tab || !text) return;
-  setStatus(tab, text);
-});
-
-window.api.onDownloadState(({ taskId, state, label, output }) => {
-  const tab = tabs.get(taskId);
-  if (!tab) return;
-
-  if (state.startsWith('running')) {
-    lockTab(tab, true);
-    tab.panel.classList.add('downloading');
-    setActiveStep(tab, 'download');
-  }
-
-  const text = label || MODE_LABELS[state] || state;
-  tab.fields.modeLabel.textContent = text;
-  setStatus(tab, text);
-  if (output) {
-    tab.outputPath = output;
-    tab.fields.resolvedOutput.textContent = output;
-  }
-  appendLog(tab, text);
-});
-
-window.api.onDownloadDone(({ taskId, result }) => {
-  const tab = tabs.get(taskId);
-  if (!tab) return;
-
-  releaseOutput(tab.outputPath, taskId);
-  tab.panel.classList.remove('downloading');
-  lockTab(tab, false);
-
-  if (result?.ok) {
-    tab.fields.progress.style.width = '100%';
-    tab.fields.percent.textContent = '100%';
-    tab.fields.modeLabel.textContent = 'Download concluido';
-    setStatus(tab, 'Download concluido! Arquivo salvo com sucesso.');
-    appendLog(tab, 'Download concluido!');
-    setActiveStep(tab, 'download');
-    markAllPreviousAsDone(tab, 'download');
-    // P8 (seção 8, passo 10): arquivo concluído pode ser aberto/localizado.
-    if (tab.outputPath) tab.fields.revealRow.hidden = false;
-    return;
-  }
-
-  tab.fields.progress.style.width = '0%';
-  tab.fields.percent.textContent = '0%';
-  // P11 (secao 42 — UX de falhas): Motivo / Acao sugerida / [Detalhes].
-  const err = result?.error || {};
-  const message = err.message || buildErrorMessage(result);
-  tab.fields.modeLabel.textContent = 'Falha no download';
-  setStatus(tab, `O download nao pode ser concluido: ${message}`);
-  appendLog(tab, `ERRO: ${message}`);
-  if (err.suggestedAction) appendLog(tab, `Acao sugerida: ${err.suggestedAction}`);
-  if (err.detail) appendLog(tab, `Detalhes: ${err.detail}`);
+// P11: downloads fluem pela fila real (src/core/queue.js) — o main process
+// encaminha os eventos do engine/fila em um canal unico `queue:event`.
+// Nenhuma aba depende mais de download:log/status/state/progress/done.
+window.api.onQueueEvent(({ event, payload }) => {
+  handleQueueEvent(event, payload);
 });
 
 newTabBtn.addEventListener('click', () => addTab());
@@ -223,6 +116,9 @@ function addTab({ copyFrom } = {}) {
     busy: false,
     duration: 0,
     outputPath: '',
+    // P11: vínculo com a fila real (jobId da DownloadQueue + estado).
+    jobId: '',
+    jobState: '', // '' | queued | active | paused | terminal
     metrics: {
       time: '--:--:--',
       size: '0 B',
@@ -362,21 +258,18 @@ function addTab({ copyFrom } = {}) {
 
   fields.downloadBtn.addEventListener('click', async () => {
     if (state.busy) return;
-    await startDownloadInTab(state);
+    // "Baixar agora": enfileira na fila real e trava a aba — o job inicia
+    // assim que houver vaga (concorrência limitada) e o engine transmite
+    // os eventos de progresso para esta aba via queue:event.
+    await enqueueForTab(state, { lockNow: true });
   });
 
-  // P8 (seção 8, passo 8): "Adicionar à fila" — cria uma nova aba com os
-  // mesmos parâmetros e inicia o download nela, sem bloquear a aba atual.
+  // P11 (item 2): "Adicionar à fila" usa a fila real de src/core/queue.js —
+  // concorrência limitada, estados aguardando/downloading/paused, pause/
+  // resume/cancel/retry — sem criar uma nova aba nem iniciar fora da fila.
   fields.enqueueBtn.addEventListener('click', async () => {
     if (state.busy) return;
-    const url = fields.url.value.trim();
-    if (!url) {
-      setStatus(state, 'Nenhuma URL informada.');
-      return;
-    }
-    const next = addTab({ copyFrom: state });
-    await startDownloadInTab(next);
-    activateTab(next.id);
+    await enqueueForTab(state, { lockNow: false });
   });
 
   fields.openFileBtn.addEventListener('click', async () => {
@@ -391,14 +284,15 @@ function addTab({ copyFrom } = {}) {
   });
 
   fields.cancelBtn.addEventListener('click', async () => {
+    if (state.jobId) {
+      await window.api.queueCancel(state.jobId);
+      setStatus(state, 'Solicitando cancelamento...');
+      appendLog(state, 'Solicitando cancelamento...');
+      return; // o evento queue:cancel finaliza a UI da aba
+    }
+    // Job ainda não criado: cancela por taskId (compatibilidade).
     await window.api.cancelDownload({ taskId: state.taskId });
-    setStatus(state, 'Operacao cancelada.');
-    fields.modeLabel.textContent = 'Cancelado';
-    appendLog(state, 'Operacao cancelada.');
-    state.panel.classList.remove('downloading');
-    state.fields.revealRow.hidden = true;
-    releaseOutput(state.outputPath, state.taskId);
-    lockTab(state, false);
+    cancelTabDownload(state);
   });
 
   tabs.set(id, state);
@@ -420,9 +314,12 @@ function activateTab(id) {
 function removeTab(id) {
   const tab = tabs.get(id);
   if (!tab) return;
-  if (tab.busy) {
+  if (tab.busy || tab.jobState === 'active' || tab.jobState === 'queued') {
     setStatus(tab, 'Cancele o download antes de excluir esta aba.');
     return;
+  }
+  if (tab.jobId) {
+    window.api.queueCancel(tab.jobId).catch(() => {});
   }
 
   releaseOutput(tab.outputPath, tab.taskId);
@@ -466,7 +363,10 @@ function renderMediaInfo(state) {
   }
 }
 
-async function startDownloadInTab(state) {
+// P11 (itens 1-2): enfileira na fila real via IPC queue:enqueue. Nenhuma
+// dependencia de runCliSession/createAnswerBook — o progresso chega pelos
+// eventos queue:event do engine (start/progress/complete/error/cancel).
+async function enqueueForTab(state, { lockNow }) {
   const fields = state.fields;
   const url = fields.url.value.trim();
   if (!url) {
@@ -491,51 +391,61 @@ async function startDownloadInTab(state) {
   }
 
   const chosenQuality = state.qualities.find((q) => q.uri === state.selectedVariantUri);
+  const qualityChoice = state.qualities.length
+    ? String(Math.max(1, (state.qualities.findIndex((q) => q.uri === state.selectedVariantUri) + 1) || 1))
+    : '';
 
   state.outputPath = fullOutput;
   activeOutputs.set(fullOutput, state.taskId);
   refreshResolvedOutput(state);
-  resetProgress(state);
-  lockTab(state, true);
-  setActiveStep(state, 'download');
-  markAllPreviousAsDone(state, 'download');
-  state.fields.modeLabel.textContent = 'Modo automatico (fallback do CLI)';
-  setStatus(state, 'Iniciando download...');
-  fields.log.textContent = [
-    '==============================================',
-    'StreamGrab - HLS / DASH / YouTube / Redes sociais',
-    'via FFmpeg + curl-impersonate (opcional)',
-    '==============================================',
-    '',
-    'Verificando FFmpeg...',
-    'FFmpeg OK.',
-    '',
-    `URL reconhecida: ${url}`,
-    state.qualities.length
-      ? `Formato escolhido: ${chosenQuality?.resolution || state.selectedQuality || 'melhor disponivel'}`
-      : 'Playlist unica detectada.',
-    `Salvando em: ${fullOutput}`,
-    'Iniciando fluxo padrao do FFmpeg...',
-  ].join('\n');
 
-  await window.api.startDownload({
-    taskId: state.taskId,
+  const result = await window.api.queueEnqueue({
     url: state.sourceUrl || url,
-    filename: baseName,
+    filename,
     outputDir,
-    qualityChoice: state.qualities.length
-      ? String(
-          Math.max(
-            1,
-            state.qualities.findIndex((q) => q.uri === state.selectedVariantUri) + 1 || 1
-          )
-        )
-      : '',
-    overwriteAction: 'overwrite',
-    overwriteNewName: '',
-    forceCurl: false,
+    selectedUrl: state.selectedQuality || '',
+    title: state.media?.title || chosenQuality?.resolution || 'video',
     turbo: fields.turbo?.checked === true,
+    qualityChoice,
+    taskId: state.taskId,
   });
+
+  if (!result || !result.ok) {
+    activeOutputs.delete(fullOutput);
+    setStatus(state, `Nao foi possivel enfileirar: ${result?.error || 'erro desconhecido'}`);
+    appendLog(state, `ERRO ao enfileirar: ${result?.error || 'erro desconhecido'}`);
+    return;
+  }
+
+  // Mantém o vínculo aba ↔ job: os eventos do engine carregam meta.taskId.
+  state.jobId = result.jobId;
+  state.jobState = 'queued';
+  if (lockNow) {
+    resetProgress(state);
+    lockTab(state, true);
+    setActiveStep(state, 'download');
+    markAllPreviousAsDone(state, 'download');
+    state.fields.modeLabel.textContent = 'Na fila — aguardando vaga';
+    setStatus(state, 'Download adicionado à fila. Iniciando assim que houver vaga...');
+  } else {
+    setStatus(state, 'Adicionado à fila — progresso em Fila / Histórico.');
+  }
+  appendLog(
+    state,
+    [
+      '==============================================',
+      'StreamGrab - HLS / DASH / YouTube / Redes sociais',
+      '==============================================',
+      '',
+      `URL reconhecida: ${url}`,
+      state.qualities.length
+        ? `Formato escolhido: ${chosenQuality?.resolution || state.selectedQuality || 'melhor disponivel'}`
+        : 'Playlist unica detectada.',
+      `Salvando em: ${fullOutput}`,
+      `Fila: jobId=${state.jobId}`,
+    ].join('\n')
+  );
+  refreshQueuePanel();
 }
 
 function renderQualities(state, emptyLabel = 'Nenhuma URL analisada ainda.') {
@@ -587,22 +497,6 @@ function appendLog(tab, line) {
   tab.fields.log.scrollTop = tab.fields.log.scrollHeight;
 }
 
-function buildErrorMessage(result) {
-  if (!result) return 'erro desconhecido';
-  if (result.error?.message) return result.error.message;
-  if (result.stderr) {
-    const tail = String(result.stderr)
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .slice(-6)
-      .join(' | ');
-    if (tail) return tail;
-  }
-  if (result.code !== undefined && result.code !== null) return `codigo ${result.code}`;
-  return 'erro desconhecido';
-}
-
 function lockTab(state, busy) {
   state.busy = busy;
   state.fields.analyzeBtn.disabled = busy;
@@ -615,16 +509,10 @@ function lockTab(state, busy) {
   state.fields.qualities.querySelectorAll('button').forEach((btn) => {
     btn.disabled = busy;
   });
-  state.fields.cancelBtn.disabled = !busy;
-  state.closeBtn.disabled = busy;
-}
-
-function timeToSeconds(value) {
-  const parts = String(value || '').split(':');
-  if (parts.length !== 3) return 0;
-  const [h, m, s] = parts.map(Number);
-  if ([h, m, s].some((n) => Number.isNaN(n))) return 0;
-  return h * 3600 + m * 60 + s;
+  // Cancelar continua habilitado enquanto o job estiver ativo ou aguardando vaga.
+  const cancelable = busy || state.jobState === 'active' || state.jobState === 'queued';
+  state.fields.cancelBtn.disabled = !cancelable;
+  state.closeBtn.disabled = busy || state.jobState === 'active';
 }
 
 function releaseOutput(output, taskId) {
@@ -660,11 +548,6 @@ function formatKbps(bandwidth) {
   if (!n) return '';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} Mbps`;
   return `${Math.round(n / 1000)} Kbps`;
-}
-
-function normalizeSpeed(value) {
-  const text = String(value || '').trim();
-  return text || 'N/A';
 }
 
 function refreshResolvedOutput(state) {
@@ -725,3 +608,549 @@ function applyTheme(theme) {
     themeLabel.textContent = theme === 'light' ? 'Modo claro' : 'Modo escuro';
   }
 }
+
+// ===========================================================================
+// P11 — Fila real, Histórico e Configurações (itens 2-5 do ajuste)
+// ===========================================================================
+
+const QUEUE_STATE_LABELS = {
+  queued: 'Aguardando',
+  analyzing: 'Analisando',
+  preparing: 'Preparando',
+  downloading: 'Baixando',
+  paused: 'Pausado',
+  merging: 'Mesclando',
+  completed: 'Concluído',
+  failed: 'Falhou',
+  cancelled: 'Cancelado',
+};
+
+const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
+const ACTIVE_STATES = new Set(['analyzing', 'preparing', 'downloading', 'merging']);
+
+// jobId -> percent, alimentado pelos eventos do engine (a fila não guarda %).
+const jobProgress = new Map();
+
+function findTabForJob(payload) {
+  if (!payload) return null;
+  if (payload.taskId) {
+    const byTask = tabs.get(payload.taskId);
+    if (byTask) return byTask;
+  }
+  if (payload.jobId) {
+    for (const t of tabs.values()) {
+      if (t.jobId === payload.jobId) return t;
+    }
+  }
+  return null;
+}
+
+function handleQueueEvent(event, payload) {
+  payload = payload || {};
+  const tab = findTabForJob(payload);
+
+  if (payload.jobId && typeof payload.percent === 'number') {
+    jobProgress.set(payload.jobId, payload.percent);
+  }
+
+  switch (event) {
+    case 'started':
+      if (tab) {
+        tab.jobId = payload.jobId || tab.jobId;
+        tab.jobState = 'active';
+        if (tab.busy) {
+          tab.panel.classList.add('downloading');
+          setActiveStep(tab, 'download');
+          markAllPreviousAsDone(tab, 'download');
+          setStatus(tab, payload.message || 'Baixando...');
+        }
+      }
+      break;
+    case 'start':
+    case 'progress':
+      if (tab && tab.busy) applyProgress(tab, payload);
+      break;
+    case 'speed':
+      if (tab && tab.busy && payload.speed != null && payload.speed !== '') {
+        // engine reporta bytes/s; formatKbps espera bits/s.
+        tab.metrics.speed = formatKbps(Number(payload.speed) * 8) || 'N/A';
+        syncMetrics(tab);
+      }
+      break;
+    case 'eta':
+      if (tab && tab.busy && payload.etaSeconds != null) {
+        tab.metrics.time = formatDuration(payload.etaSeconds);
+        syncMetrics(tab);
+      }
+      break;
+    case 'pause':
+      if (tab) {
+        tab.jobState = 'paused';
+        if (tab.busy) {
+          tab.panel.classList.remove('downloading');
+          setStatus(tab, 'Pausado. Retome pela Fila ou pelo botão da aba.');
+          appendLog(tab, 'Download pausado.');
+        }
+      }
+      break;
+    case 'resume':
+      if (tab) {
+        tab.jobState = 'active';
+        if (tab.busy) {
+          tab.panel.classList.add('downloading');
+          setStatus(tab, 'Retomando download...');
+          appendLog(tab, 'Download retomado.');
+        }
+      }
+      break;
+    case 'complete':
+      if (tab) finishTabDownload(tab, payload);
+      break;
+    case 'error':
+      if (tab) failTabDownload(tab, payload);
+      break;
+    case 'cancel':
+      if (tab) cancelTabDownload(tab, payload);
+      break;
+    default:
+      break;
+  }
+
+  refreshQueuePanel();
+  if (event === 'complete' || event === 'error' || event === 'cancel') {
+    refreshHistoryPanel();
+  }
+}
+
+function applyProgress(tab, payload) {
+  const pct = Number(payload.percent);
+  if (Number.isFinite(pct) && pct > 0) {
+    const capped = Math.min(99, pct);
+    tab.fields.progress.style.width = `${capped}%`;
+    tab.fields.percent.textContent = `${Math.floor(capped)}%`;
+  }
+  if (payload.bytesDownloaded != null) {
+    tab.metrics.size = formatBytes(payload.bytesDownloaded);
+    if (payload.totalBytes) tab.fields.progress.dataset.total = formatBytes(payload.totalBytes);
+  } else if (payload.downloaded != null) {
+    tab.metrics.size = formatBytes(payload.downloaded);
+  }
+  syncMetrics(tab);
+  setActiveStep(tab, 'download');
+  markAllPreviousAsDone(tab, 'download');
+  if (payload.message) {
+    setStatus(tab, payload.message);
+  } else if (Number.isFinite(pct) && pct > 0) {
+    setStatus(tab, `Baixando... ${Math.floor(Math.min(99, pct))}%`);
+  } else {
+    setStatus(tab, 'Baixando...');
+  }
+  if (payload.stage && payload.message) appendLog(tab, `[${payload.stage}] ${payload.message}`);
+}
+
+function finishTabDownload(tab, payload) {
+  const output = payload.output || tab.outputPath;
+  tab.outputPath = output;
+  tab.jobState = 'terminal';
+  releaseOutput(tab.outputPath, tab.taskId);
+  tab.panel.classList.remove('downloading');
+  lockTab(tab, false);
+  tab.fields.progress.style.width = '100%';
+  tab.fields.percent.textContent = '100%';
+  tab.fields.modeLabel.textContent = 'Download concluído';
+  setStatus(tab, 'Download concluído!');
+  if (output) tab.fields.resolvedOutput.textContent = output;
+  appendLog(tab, `Download concluído! ${output}`);
+  markAllPreviousAsDone(tab, 'download');
+  if (output) tab.fields.revealRow.hidden = false;
+}
+
+function failTabDownload(tab, payload) {
+  tab.jobState = 'terminal';
+  releaseOutput(tab.outputPath, tab.taskId);
+  tab.panel.classList.remove('downloading');
+  lockTab(tab, false);
+  tab.fields.progress.style.width = '0%';
+  tab.fields.percent.textContent = '0%';
+  tab.fields.modeLabel.textContent = 'Falha no download';
+  const message = payload.message || 'O download não pôde ser concluído.';
+  setStatus(tab, `Falha: ${message}`);
+  appendLog(tab, `ERRO: ${message}`);
+  if (payload.suggestedAction) appendLog(tab, `Ação sugerida: ${payload.suggestedAction}`);
+  if (payload.detail) appendLog(tab, `Detalhes: ${payload.detail}`);
+}
+
+function cancelTabDownload(tab, payload) {
+  tab.jobState = 'terminal';
+  releaseOutput(tab.outputPath, tab.taskId);
+  tab.panel.classList.remove('downloading');
+  lockTab(tab, false);
+  tab.fields.progress.style.width = '0%';
+  tab.fields.percent.textContent = '0%';
+  tab.fields.modeLabel.textContent = 'Cancelado';
+  setStatus(tab, (payload && payload.message) || 'Download cancelado.');
+  appendLog(tab, (payload && payload.message) || 'Download cancelado.');
+  tab.fields.revealRow.hidden = true;
+}
+
+function formatDuration(totalSeconds) {
+  const total = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+// --- Fila -------------------------------------------------------------------
+
+async function refreshQueuePanel() {
+  const listEl = document.getElementById('queueList');
+  if (!listEl) return;
+  const emptyEl = document.getElementById('queueEmpty');
+  const summaryEl = document.getElementById('queueSummary');
+  const badgeEl = document.getElementById('queueBadge');
+  const toggleBtn = document.getElementById('queueTogglePauseBtn');
+
+  let data;
+  try {
+    data = await window.api.queueList();
+  } catch {
+    return;
+  }
+  const jobs = data.jobs || [];
+  const activeCount = jobs.filter((j) => ACTIVE_STATES.has(j.state)).length;
+  const nonTerminal = jobs.filter((j) => !TERMINAL_STATES.has(j.state));
+
+  if (badgeEl) {
+    badgeEl.hidden = nonTerminal.length === 0;
+    badgeEl.textContent = String(nonTerminal.length);
+  }
+  if (toggleBtn) toggleBtn.textContent = data.paused ? 'Retomar fila' : 'Pausar fila';
+  if (summaryEl) {
+    summaryEl.textContent =
+      `${activeCount}/${data.maxConcurrent} ativos · ${nonTerminal.length} na fila · ` +
+      `${jobs.length - nonTerminal.length} concluídos/falhos/cancelados`;
+  }
+  if (emptyEl) emptyEl.hidden = jobs.length > 0;
+  listEl.innerHTML = '';
+  for (const job of jobs) listEl.appendChild(renderQueueItem(job));
+}
+
+function renderQueueItem(job) {
+  const item = document.createElement('div');
+  item.className = 'queue-item';
+  item.dataset.jobId = job.id;
+
+  const state = job.state;
+  const terminal = TERMINAL_STATES.has(state);
+  const percent = Math.min(100, jobProgress.get(job.id) || 0);
+  const totalBytes = Number(job.meta?.totalBytes) || 0;
+
+  const head = document.createElement('div');
+  head.className = 'queue-item-head';
+
+  const titleWrap = document.createElement('div');
+  titleWrap.style.minWidth = '0';
+  const title = document.createElement('div');
+  title.className = 'queue-item-title';
+  title.textContent = job.meta?.filename || job.title || 'Download';
+  const sub = document.createElement('div');
+  sub.className = 'queue-item-url';
+  sub.textContent = job.meta?.sourceUrl || job.url || '';
+  titleWrap.append(title, sub);
+
+  const statePill = document.createElement('span');
+  statePill.className = 'job-state';
+  statePill.dataset.state = state;
+  statePill.textContent = QUEUE_STATE_LABELS[state] || state;
+
+  head.append(titleWrap, statePill);
+  item.appendChild(head);
+
+  const meta = document.createElement('div');
+  meta.className = 'queue-item-meta';
+  const bits = [`id: ${job.id}`];
+  if (!terminal) bits.push(`${Math.floor(percent)}%`);
+  if (totalBytes > 0) bits.push(formatBytes(totalBytes));
+  if (state === 'failed' && job.error?.message) bits.push(job.error.message);
+  meta.textContent = bits.join(' · ');
+  item.appendChild(meta);
+
+  if (!terminal && state !== 'paused' && percent > 0) {
+    const mini = document.createElement('div');
+    mini.className = 'mini-progress';
+    const bar = document.createElement('div');
+    bar.className = 'progress-bar';
+    const fill = document.createElement('span');
+    fill.style.width = `${percent}%`;
+    bar.appendChild(fill);
+    mini.appendChild(bar);
+    item.appendChild(mini);
+  }
+
+  if (state === 'failed' && job.error?.message) {
+    const err = document.createElement('div');
+    err.className = 'queue-item-error';
+    err.textContent = job.error.message;
+    if (job.error.code) err.textContent += ` (${job.error.code})`;
+    item.appendChild(err);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'queue-item-actions';
+  const act = (label, fn) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'button button-ghost';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      fn().catch(() => {});
+      refreshQueuePanel();
+    });
+    actions.appendChild(btn);
+  };
+
+  if (state === 'queued') {
+    act('Cancelar', () => window.api.queueCancel(job.id));
+  } else if (state === 'downloading' || state === 'analyzing' || state === 'preparing' || state === 'merging') {
+    act('Pausar', () => window.api.queuePause(job.id));
+    act('Cancelar', () => window.api.queueCancel(job.id));
+  } else if (state === 'paused') {
+    act('Retomar', () => window.api.queueResume(job.id));
+    act('Cancelar', () => window.api.queueCancel(job.id));
+  } else if (terminal) {
+    if (state === 'completed' && job.meta?.output) {
+      act('Abrir arquivo', () => window.api.openFile({ filePath: job.meta.output }));
+      act('Mostrar na pasta', () => window.api.showInFolder({ filePath: job.meta.output }));
+    }
+    if (state === 'failed' || state === 'cancelled') {
+      act('Tentar novamente', () => window.api.queueRetry(job.id));
+    }
+    act('Remover', () => window.api.queueRemove(job.id));
+  }
+  item.appendChild(actions);
+  return item;
+}
+
+// --- Histórico ---------------------------------------------------------------
+
+async function refreshHistoryPanel() {
+  const listEl = document.getElementById('historyList');
+  if (!listEl) return;
+  const emptyEl = document.getElementById('historyEmpty');
+  const summaryEl = document.getElementById('historySummary');
+
+  let entries;
+  try {
+    entries = await window.api.historyList();
+  } catch {
+    return;
+  }
+  const list = entries || [];
+  if (summaryEl) summaryEl.textContent = `${list.length} registros`;
+  if (emptyEl) emptyEl.hidden = list.length > 0;
+  listEl.innerHTML = '';
+  for (const entry of list) listEl.appendChild(renderHistoryItem(entry));
+}
+
+function renderHistoryItem(entry) {
+  const item = document.createElement('div');
+  item.className = 'queue-item';
+
+  const head = document.createElement('div');
+  head.className = 'queue-item-head';
+
+  const titleWrap = document.createElement('div');
+  titleWrap.style.minWidth = '0';
+  const title = document.createElement('div');
+  title.className = 'queue-item-title';
+  title.textContent = entry.title || entry.url;
+  const sub = document.createElement('div');
+  sub.className = 'queue-item-url';
+  sub.textContent = entry.url || '';
+  titleWrap.append(title, sub);
+
+  const statePill = document.createElement('span');
+  statePill.className = 'job-state';
+  statePill.dataset.state = entry.status || 'completed';
+  statePill.textContent = QUEUE_STATE_LABELS[entry.status] || entry.status || 'Concluído';
+
+  head.append(titleWrap, statePill);
+  item.appendChild(head);
+
+  const meta = document.createElement('div');
+  meta.className = 'queue-item-meta';
+  const bits = [];
+  if (entry.date) bits.push(formatDate(entry.date));
+  if (entry.provider) bits.push(entry.provider);
+  if (entry.format) bits.push(entry.format);
+  if (entry.size) bits.push(formatBytes(entry.size));
+  if (entry.destination) bits.push(entry.destination);
+  meta.textContent = bits.join(' · ');
+  item.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'queue-item-actions';
+  const act = (label, fn) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'button button-ghost';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      fn().catch(() => {});
+      refreshHistoryPanel();
+      refreshQueuePanel();
+    });
+    actions.appendChild(btn);
+  };
+
+  if (entry.destination) {
+    act('Abrir arquivo', () => window.api.openFile({ filePath: entry.destination }));
+    act('Mostrar na pasta', () => window.api.showInFolder({ filePath: entry.destination }));
+  }
+  act('Baixar de novo', () => window.api.historyRedownload(entry.id));
+  act('Remover', () => window.api.historyRemove(entry.id));
+  item.appendChild(actions);
+  return item;
+}
+
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return String(iso);
+  }
+}
+
+// --- Configurações ------------------------------------------------------------
+
+async function renderSettingsPanel() {
+  const form = document.getElementById('settingsForm');
+  if (!form) return;
+  let settings;
+  try {
+    settings = await window.api.settingsGet();
+  } catch {
+    return;
+  }
+  for (const input of form.querySelectorAll('[data-setting]')) {
+    const key = input.dataset.setting;
+    const value = settings[key];
+    if (input.type === 'checkbox') {
+      input.checked = Boolean(value);
+    } else if (input.type === 'number') {
+      input.value = value == null ? '' : String(value);
+    } else {
+      input.value = value == null ? '' : String(value);
+    }
+  }
+}
+
+function collectSettingsForm() {
+  const form = document.getElementById('settingsForm');
+  const partial = {};
+  for (const input of form.querySelectorAll('[data-setting]')) {
+    const key = input.dataset.setting;
+    if (input.type === 'checkbox') {
+      partial[key] = input.checked;
+    } else if (input.type === 'number') {
+      const n = Number(input.value);
+      partial[key] = Number.isFinite(n) ? n : null;
+    } else {
+      partial[key] = input.value.trim();
+    }
+  }
+  return partial;
+}
+
+function settingsStatus(text, ok = true) {
+  const el = document.querySelector('[data-field="settingsStatus"]');
+  if (el) {
+    el.textContent = text;
+    el.style.color = ok ? 'var(--accent)' : 'var(--danger)';
+  }
+}
+
+// --- Navegação ---------------------------------------------------------------
+
+const VIEWS = ['videos', 'queue', 'history', 'settings'];
+
+function switchView(name) {
+  if (!VIEWS.includes(name)) return;
+  for (const viewName of VIEWS) {
+    const view = document.getElementById(`view-${viewName}`);
+    const btn = document.getElementById(
+      { videos: 'viewVideosBtn', queue: 'viewQueueBtn', history: 'viewHistoryBtn', settings: 'viewSettingsBtn' }[viewName]
+    );
+    if (view) view.hidden = viewName !== name;
+    if (btn) btn.classList.toggle('active', viewName === name);
+  }
+  if (name === 'queue') refreshQueuePanel();
+  if (name === 'history') refreshHistoryPanel();
+  if (name === 'settings') renderSettingsPanel();
+}
+
+function initializePanels() {
+  const wire = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', fn);
+  };
+
+  wire('viewVideosBtn', () => switchView('videos'));
+  wire('viewQueueBtn', () => switchView('queue'));
+  wire('viewHistoryBtn', () => switchView('history'));
+  wire('viewSettingsBtn', () => switchView('settings'));
+
+  wire('queueRefreshBtn', () => refreshQueuePanel());
+  wire('queueTogglePauseBtn', async () => {
+    const btn = document.getElementById('queueTogglePauseBtn');
+    const shouldPause = btn?.textContent.trim() === 'Pausar fila';
+    await window.api.queueSetPaused(shouldPause);
+    refreshQueuePanel();
+  });
+
+  wire('historyRefreshBtn', () => refreshHistoryPanel());
+  wire('historyClearBtn', async () => {
+    await window.api.historyClear();
+    refreshHistoryPanel();
+  });
+
+  wire('settingsSaveBtn', async () => {
+    const partial = collectSettingsForm();
+    const res = await window.api.settingsUpdate(partial);
+    if (res?.ok) {
+      settingsStatus('Configurações salvas.');
+      // Aplica o tema escolhido imediatamente.
+      if (partial.theme === 'light' || partial.theme === 'dark') {
+        localStorage.setItem('vd-theme', partial.theme);
+        applyTheme(partial.theme);
+      }
+      refreshQueuePanel();
+    } else {
+      settingsStatus(res?.error || 'Falha ao salvar.', false);
+    }
+  });
+  wire('settingsResetBtn', async () => {
+    await window.api.settingsReset();
+    await renderSettingsPanel();
+    settingsStatus('Configurações restauradas para o padrão.');
+  });
+  wire('settingsPickDirBtn', async () => {
+    const picked = await window.api.pickOutputDir();
+    if (picked) {
+      const input = document.querySelector('[data-setting="defaultDir"]');
+      if (input) input.value = picked;
+    }
+  });
+
+  // Atualiza o painel de fila ao alternar para a aba "Fila".
+  refreshQueuePanel();
+  refreshHistoryPanel();
+  renderSettingsPanel();
+}
+
+initializePanels();

@@ -1,7 +1,7 @@
 {
   "name": "streamgrab",
   "version": "0.1.0",
-  "description": "Universal video downloader for HLS, DASH, YouTube and supported web platforms.",
+  "description": "Universal video downloader for HLS, DASH, YouTube and other supported sources.",
   "type": "module",
   "main": "electron/main.js",
   "bin": {

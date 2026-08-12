@@ -35,11 +35,14 @@ export { createDefaultExecutor };
  *  - resolveAdapter: deteccao de fonte (default: defaultResolveAdapter)
  *  - settings/disk/history/atomic: colaboradores P7 (opcionais, injetados no
  *    DownloadEngine — sem mudar o comportamento quando ausentes)
+ *  - engine: DownloadEngine injetavel (P11/Eletron) — quando fornecido, a
+ *    fachada usa essa instancia em vez de criar uma nova (permite que o
+ *    Electron compartilhe o mesmo engine com a DownloadQueue).
  */
 export class StreamGrabCore {
-  constructor({ events = createEventBus(), executor = createDefaultExecutor(), progressThrottleMs = 80, resolveAdapter, settings, disk, history, atomic } = {}) {
-    this.events = events;
-    this._engine = new DownloadEngine({ events, executor, progressThrottleMs, resolveAdapter, settings, disk, history, atomic });
+  constructor({ events = createEventBus(), executor = createDefaultExecutor(), progressThrottleMs = 80, resolveAdapter, settings, disk, history, atomic, engine } = {}) {
+    this.events = engine ? engine.events || events : events;
+    this._engine = engine || new DownloadEngine({ events, executor, progressThrottleMs, resolveAdapter, settings, disk, history, atomic });
   }
 
   // -- eventos --------------------------------------------------------------

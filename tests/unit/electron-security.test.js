@@ -12,6 +12,11 @@ import {
   validateCancelPayload,
   validateRevealPayload,
   isPathWithin,
+  isValidJobId,
+  validateJobIdPayload,
+  validateHistoryIdPayload,
+  validateQueueEnqueuePayload,
+  validateSettingsPayload,
 } from '../../electron/security.js';
 
 // ---------------------------------------------------------------------------
@@ -229,4 +234,132 @@ test('validateRevealPayload restringe abertura a raízes permitidas', () => {
   assert.equal(validateRevealPayload({ filePath: 'C:\\Users\\..\\etc' }, roots), null);
   assert.equal(validateRevealPayload({}, roots), null);
   assert.equal(validateRevealPayload({ filePath: 'relative.mp4' }, roots), null);
+});
+
+// ---------------------------------------------------------------------------
+// P11 — novos validadores (fila / histórico / configurações)
+// ---------------------------------------------------------------------------
+
+test('isValidJobId aceita ids de job e rejeita payloads perigosos', () => {
+  assert.equal(isValidJobId('job-1'), true);
+  assert.equal(isValidJobId('job_abc-123'), true);
+  assert.equal(isValidJobId('a'.repeat(64)), true);
+  assert.equal(isValidJobId(''), false);
+  assert.equal(isValidJobId('job 1'), false);
+  assert.equal(isValidJobId('job-1; rm -rf /'), false);
+  assert.equal(isValidJobId('a'.repeat(65)), false);
+  assert.equal(isValidJobId('../job'), false);
+  assert.equal(isValidJobId(null), false);
+  assert.equal(isValidJobId(42), false);
+});
+
+test('validateJobIdPayload valida { jobId }', () => {
+  assert.deepEqual(validateJobIdPayload({ jobId: 'job-7' }), { jobId: 'job-7' });
+  assert.equal(validateJobIdPayload({ jobId: 'x; rm' }), null);
+  assert.equal(validateJobIdPayload({}), null);
+  assert.equal(validateJobIdPayload(null), null);
+});
+
+test('validateHistoryIdPayload valida { id }', () => {
+  assert.deepEqual(validateHistoryIdPayload({ id: 'hist-3' }), { id: 'hist-3' });
+  assert.equal(validateHistoryIdPayload({ id: '../x' }), null);
+  assert.equal(validateHistoryIdPayload({}), null);
+});
+
+test('validateQueueEnqueuePayload aceita payload de fila válido (filename opcional)', () => {
+  const out = validateQueueEnqueuePayload({
+    url: 'https://example.com/video.mp4',
+    filename: 'meu video',
+    outputDir: 'C:\\Users\\teste\\Downloads',
+    selectedUrl: 'https://example.com/video.mp4',
+    title: 'Meu video',
+    turbo: true,
+    qualityChoice: '2',
+  });
+  assert.ok(out);
+  assert.equal(out.url, 'https://example.com/video.mp4');
+  assert.equal(out.filename, 'meu video');
+  assert.equal(out.selectedUrl, 'https://example.com/video.mp4');
+  assert.equal(out.title, 'Meu video');
+  assert.equal(out.turbo, true);
+  assert.equal(out.qualityChoice, '2');
+});
+
+test('validateQueueEnqueuePayload normaliza campos opcionais e valida segurança', () => {
+  // filename opcional agora (o engine usa meta.filename OU o título da análise)
+  const out = validateQueueEnqueuePayload({ url: 'https://example.com/v.mp4' });
+  assert.ok(out);
+  assert.equal(out.filename, '');
+  assert.equal(out.outputDir, '');
+  assert.equal(out.selectedUrl, '');
+  assert.equal(out.title, '');
+  assert.equal(out.turbo, false);
+
+  assert.equal(validateQueueEnqueuePayload({}), null);
+  assert.equal(validateQueueEnqueuePayload({ url: 'file:///etc' }), null);
+  assert.equal(
+    validateQueueEnqueuePayload({ url: 'https://example.com', selectedUrl: 'javascript:alert(1)' }),
+    null
+  );
+  assert.equal(
+    validateQueueEnqueuePayload({ url: 'https://example.com', outputDir: 'C:\\Users\\..\\Windows' }),
+    null
+  );
+  // filename perigoso NAO rejeita: sanitiza para '' (campo é opcional)
+  const traversal = validateQueueEnqueuePayload({ url: 'https://example.com', filename: '../x' });
+  assert.ok(traversal);
+  assert.equal(traversal.filename, '');
+  assert.equal(
+    validateQueueEnqueuePayload({ url: 'https://example.com', qualityChoice: 'abc' }),
+    null
+  );
+});
+
+test('validateDownloadPayload agora aceita selectedUrl e title', () => {
+  const out = validateDownloadPayload({
+    taskId: 'tab-1',
+    url: 'https://example.com/v.m3u8',
+    filename: 'video',
+    selectedUrl: 'https://example.com/variante.m3u8',
+    title: '  Título longo  ',
+  });
+  assert.ok(out);
+  assert.equal(out.selectedUrl, 'https://example.com/variante.m3u8');
+  assert.equal(out.title, 'Título longo');
+  // selectedUrl perigosa invalida o payload
+  assert.equal(
+    validateDownloadPayload({
+      taskId: 'tab-1',
+      url: 'https://example.com/v.m3u8',
+      filename: 'video',
+      selectedUrl: 'file:///etc/passwd',
+    }),
+    null
+  );
+});
+
+test('validateSettingsPayload aceita somente chaves conhecidas e valida defaultDir', () => {
+  const out = validateSettingsPayload({
+    maxConcurrentDownloads: 5,
+    defaultDir: 'C:\\Users\\teste\\Downloads',
+    turbo: true,
+    historyRetentionDays: 30,
+    chaveEstranha: 'x',
+  });
+  assert.ok(out);
+  assert.equal(out.maxConcurrentDownloads, 5);
+  assert.equal(out.defaultDir, 'C:\\Users\\teste\\Downloads');
+  assert.equal(out.turbo, true);
+  assert.equal(out.historyRetentionDays, 30);
+  assert.equal(out.chaveEstranha, undefined);
+});
+
+test('validateSettingsPayload rejeita payloads inválidos', () => {
+  assert.equal(validateSettingsPayload(null), null);
+  assert.equal(validateSettingsPayload('x'), null);
+  assert.equal(validateSettingsPayload([]), null);
+  assert.equal(validateSettingsPayload({ defaultDir: 'C:\\Users\\..\\Windows' }), null);
+  assert.equal(validateSettingsPayload({ defaultDir: 'relative' }), null);
+  // payload vazio é válido (nada a atualizar)
+  assert.deepEqual(validateSettingsPayload({}), {});
 });

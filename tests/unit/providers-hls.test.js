@@ -28,6 +28,81 @@ test('hls drm: METHOD fora de NONE/AES-128 lanca UnsupportedDrmError', () => {
   );
 });
 
+test('hls drm: EXT-X-SESSION-KEY com AES-128/identity passa (chave pre-declarada)', () => {
+  // P11: a tag nao bloqueia mais por existir — criptografia segue AES-128,
+  // que o fluxo atual suporta (o FFmpeg baixa a chave declarada).
+  const masterAes = [
+    '#EXTM3U',
+    '#EXT-X-SESSION-KEY:METHOD=AES-128,URI="key.bin",KEYFORMAT="identity"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360',
+    '360p.m3u8',
+    '',
+  ].join('\n');
+  assert.equal(checkHlsDrm(masterAes), false);
+
+  const masterNoKeyformat = [
+    '#EXTM3U',
+    '#EXT-X-SESSION-KEY:METHOD=AES-128,URI="key.bin"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360',
+    '360p.m3u8',
+    '',
+  ].join('\n');
+  assert.equal(checkHlsDrm(masterNoKeyformat), false);
+});
+
+test('hls drm: EXT-X-SESSION-KEY com DRM real lanca UnsupportedDrmError', () => {
+  // SAMPLE-AES no master (independe do KEYFORMAT).
+  const masterSample = [
+    '#EXTM3U',
+    '#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES,URI="skd://license"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360',
+    '360p.m3u8',
+    '',
+  ].join('\n');
+  assert.throws(() => checkHlsDrm(masterSample), UnsupportedDrmError);
+
+  // FairPlay: mesmo com METHOD=AES-128, o KEYFORMAT comercial e DRM.
+  const masterFairPlay = [
+    '#EXTM3U',
+    '#EXT-X-SESSION-KEY:METHOD=AES-128,URI="skd://license",KEYFORMAT="com.apple.streamingkeydelivery"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360',
+    '360p.m3u8',
+    '',
+  ].join('\n');
+  assert.throws(() => checkHlsDrm(masterFairPlay), UnsupportedDrmError);
+
+  // Widevine e PlayReady tambem sao DRM (KEYFORMAT proprio).
+  for (const keyformat of [
+    'urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed',
+    'com.microsoft.playready',
+  ]) {
+    const master = [
+      '#EXTM3U',
+      `#EXT-X-SESSION-KEY:METHOD=AES-128,URI="skd://license",KEYFORMAT="${keyformat}"`,
+      '#EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360',
+      '360p.m3u8',
+      '',
+    ].join('\n');
+    assert.throws(() => checkHlsDrm(master), UnsupportedDrmError);
+  }
+});
+
+test('hls drm: EXT-X-KEY com KEYFORMAT FairPlay lanca mesmo com METHOD=AES-128', () => {
+  // P11: KEYFORMAT analisado tambem nos #EXT-X-KEY (fMP4 FairPlay).
+  assert.throws(
+    () =>
+      checkHlsDrm(
+        '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="skd://x",KEYFORMAT="com.apple.streamingkeydelivery"\nseg.ts\n'
+      ),
+    UnsupportedDrmError
+  );
+  // KEYFORMAT=identity e equivalente a ausente: permitido.
+  assert.equal(
+    checkHlsDrm('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin",KEYFORMAT="identity"\nseg.ts\n'),
+    false
+  );
+});
+
 test('hls drm: EXT-X-SESSION-KEY no master lanca UnsupportedDrmError', () => {
   const master = [
     '#EXTM3U',

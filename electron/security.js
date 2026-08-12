@@ -98,6 +98,12 @@ export function validateDownloadPayload(payload = {}) {
   const qualityChoice = typeof payload?.qualityChoice === 'string' ? payload.qualityChoice : '';
   if (qualityChoice && !/^\d+$/.test(qualityChoice)) return null;
 
+  // P11: URL do formato escolhido (variante HLS/DASH/YouTube) e titulo
+  // opcional vindos do renderer — usados pelo engine/queue sem prompts.
+  const selectedUrl = typeof payload?.selectedUrl === 'string' ? payload.selectedUrl.trim() : '';
+  if (selectedUrl && !isSafeHttpUrl(selectedUrl)) return null;
+  const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 200) : '';
+
   const overwriteAction = ['overwrite', 'rename', 'cancel'].includes(payload?.overwriteAction)
     ? payload.overwriteAction
     : 'overwrite';
@@ -114,6 +120,8 @@ export function validateDownloadPayload(payload = {}) {
     filename,
     outputDir,
     qualityChoice,
+    selectedUrl,
+    title,
     overwriteAction,
     overwriteNewName,
     forceCurl,
@@ -127,6 +135,100 @@ export function validateDownloadPayload(payload = {}) {
 export function validateCancelPayload(payload = {}) {
   if (!isValidTaskId(payload?.taskId)) return null;
   return { taskId: String(payload.taskId) };
+}
+
+// ---------------------------------------------------------------------------
+// P11 — fila / historico / configuracoes
+// ---------------------------------------------------------------------------
+
+const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Valida o identificador de job da fila (job-<n>) ou entrada de historico. */
+export function isValidJobId(value) {
+  return typeof value === 'string' && JOB_ID_RE.test(value);
+}
+
+/** Payload de operacoes por id: { jobId }. */
+export function validateJobIdPayload(payload = {}) {
+  if (!isValidJobId(payload?.jobId)) return null;
+  return { jobId: String(payload.jobId) };
+}
+
+/** Payload de operacoes de historico por id: { id }. */
+export function validateHistoryIdPayload(payload = {}) {
+  if (!isValidJobId(payload?.id)) return null;
+  return { id: String(payload.id) };
+}
+
+/**
+ * Valida o payload de `queue:enqueue` (botao "Adicionar a fila" / "Baixar").
+ * Retorna o payload limpo ou null.
+ */
+export function validateQueueEnqueuePayload(payload = {}) {
+  const url = typeof payload?.url === 'string' ? payload.url.trim() : '';
+  if (!isSafeHttpUrl(url)) return null;
+
+  const filename = sanitizeDownloadFilename(payload?.filename);
+  const outputDir = typeof payload?.outputDir === 'string' ? payload.outputDir.trim() : '';
+  if (outputDir && !isSafeAbsolutePath(outputDir)) return null;
+
+  const selectedUrl = typeof payload?.selectedUrl === 'string' ? payload.selectedUrl.trim() : '';
+  if (selectedUrl && !isSafeHttpUrl(selectedUrl)) return null;
+
+  const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 200) : '';
+  const turbo = payload?.turbo === true;
+  const qualityChoice = typeof payload?.qualityChoice === 'string' ? payload.qualityChoice : '';
+  if (qualityChoice && !/^\d+$/.test(qualityChoice)) return null;
+
+  const cookiesFile = typeof payload?.cookiesFile === 'string' ? payload.cookiesFile : '';
+  const cookiesFromBrowser = typeof payload?.cookiesFromBrowser === 'string' ? payload.cookiesFromBrowser : '';
+
+  return {
+    url,
+    filename,
+    outputDir,
+    selectedUrl,
+    title,
+    turbo,
+    qualityChoice,
+    cookiesFile,
+    cookiesFromBrowser,
+  };
+}
+
+/** Chaves de settings aceitas pelo renderer (o store core valida os tipos). */
+const SETTINGS_KEYS = new Set([
+  'defaultDir',
+  'maxConcurrentDownloads',
+  'turbo',
+  'turboChunks',
+  'smartTurbo',
+  'defaultQuality',
+  'audio',
+  'notifications',
+  'theme',
+  'onComplete',
+  'historyRetentionDays',
+]);
+
+/**
+ * Valida o payload de `settings:update`: objeto plano com chaves conhecidas;
+ * defaultDir, quando preenchido, deve ser caminho absoluto seguro.
+ */
+export function validateSettingsPayload(payload = {}) {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const clean = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (!SETTINGS_KEYS.has(key)) continue;
+    if (key === 'defaultDir') {
+      const dir = typeof value === 'string' ? value.trim() : '';
+      if (dir && !isSafeAbsolutePath(dir)) return null;
+      clean[key] = dir;
+    } else {
+      clean[key] = value;
+    }
+  }
+  return clean;
 }
 
 /** Valida o payload de `app:open-file` / `app:show-in-folder`. */

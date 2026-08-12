@@ -94,8 +94,18 @@ export function createDownloadQueue({ engine, maxConcurrent = 3, storage = null,
         const job = orderedJobs().find((j) => j.state === 'queued' && !_started.has(j.id));
         if (!job) break;
         _started.add(job.id);
+        // P11: propaga as opcoes por-job guardadas em meta (pasta de saida,
+        // formato escolhido, headers/auth) para o engine — a UI nao depende
+        // mais da simulacao de prompts do CLI para definir o destino.
+        const runOpts = {
+          destination: job.meta?.destination || undefined,
+          selectedUrl: job.meta?.selectedUrl || undefined,
+          headers: job.meta?.headers || undefined,
+          auth: job.meta?.auth || undefined,
+          mode: job.meta?.mode || undefined,
+        };
         const p = engine
-          .run(job.id, {})
+          .run(job.id, runOpts)
           .catch(() => {}) // estado terminal ja registrado via eventos
           .finally(() => _running.delete(job.id));
         _running.set(job.id, p);
@@ -112,9 +122,31 @@ export function createDownloadQueue({ engine, maxConcurrent = 3, storage = null,
       return maxConcurrent;
     },
 
+    /** Ajusta o limite de downloads simultaneos em tempo de execucao. */
+    setMaxConcurrent(n) {
+      const value = Number(n);
+      if (!Number.isFinite(value)) return maxConcurrent;
+      maxConcurrent = Math.min(16, Math.max(1, value));
+      if (autoStart && !_paused) _pump();
+      return maxConcurrent;
+    },
+
+    /** True quando o processamento da fila esta pausado como um todo. */
+    get paused() {
+      return _paused;
+    },
+
     /** Jobs nao terminais, na ordem da fila. */
     list() {
       return orderedJobs().filter(isNonTerminal);
+    },
+
+    /**
+     * Todos os jobs (incluindo terminais) na ordem da fila — usado pela UI
+     * para oferecer retry/remove de jobs concluidos/falhos/cancelados.
+     */
+    all() {
+      return orderedJobs().map((j) => ({ ...j, meta: { ...j.meta } }));
     },
 
     get(id) {

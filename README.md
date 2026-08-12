@@ -2,7 +2,7 @@
 
 # StreamGrab
 
-**Fast, universal video downloader for HLS, DASH, YouTube and the web.**
+**Fast, universal video downloader for HLS, DASH, YouTube and other supported sources.**
 
 | 🇧🇷 [Português](#pt) | 🇺🇸 [English](#en) | 🇪🇸 [Español](#es) |
 |---|---|---|
@@ -13,7 +13,7 @@
 
 <h2 id="pt">🇧🇷 Português</h2>
 
-Aplicativo **CLI em Node.js** (com interface **Electron** opcional) para baixar vídeos de **HLS (.m3u8)**, **DASH (.mpd)**, **YouTube**, **redes sociais** e **arquivos diretos** usando o **FFmpeg**, de forma simples e segura no Windows. Suporta Mídia Stream (mdstrm) via curl-impersonate, download paralelo (turbo) em URLs diretas e mux de vídeo+áudio para máxima qualidade.
+Aplicativo **CLI em Node.js** (com interface **Electron** opcional) para baixar vídeos de **HLS (.m3u8)**, **DASH (.mpd)**, **YouTube**, **redes sociais**, **arquivos diretos** e **outras fontes suportadas** (qualquer site coberto pelo motor yt-dlp) usando o **FFmpeg**, de forma simples e segura no Windows. Suporta Mídia Stream (mdstrm) via curl-impersonate, download paralelo (turbo) em URLs diretas e mux de vídeo+áudio para máxima qualidade.
 
 > ⚠️ **Uso responsável**
 > Esta ferramenta trabalha **somente** com URLs que você mesmo fornece e para as quais você já tem **acesso legítimo e autorizado** pela plataforma. Ela **não** faz bypass de DRM (Widevine etc.), não burla autenticação, não captura cookies do navegador, não descobre credenciais e não tenta acessar nada além do que a URL fornecida já permite.
@@ -425,6 +425,16 @@ npm install --save-dev ntl
 npx ntl        # abre o menu; escolha download:curl
 nt             # reexecuta o último script escolhido
 ```
+
+### 🖥 Interface Electron (fila, histórico e configurações)
+
+Além do CLI, o app pode ser aberto como interface gráfica (`npm start`) com:
+
+- **Vídeos** — abas com análise de URL, escolha de qualidade/variante, pasta de destino e **"Baixar agora"**;
+- **Fila** — downloads reais com **concorrência limitada** (1–16 simultâneos), estados *aguardando/baixando/pausado*, **pause/resume/cancelar/tentar novamente/remover** por item e pausa global da fila;
+- **Histórico** — registros persistidos de cada download com **abrir arquivo / mostrar na pasta / baixar de novo / remover / limpar**;
+- **Configurações** — pasta padrão, downloads simultâneos, turbo, qualidade padrão, áudio, tema, notificações, comando ao concluir e retenção do histórico;
+- Fila, histórico e configurações são **persistidos em disco** (`settings.json`, `history.json`, `queue.json`) e restaurados ao reiniciar o app — inclusive com **recuperação de downloads interrompidos** (jobs voltam para a fila como *aguardando*).
 
 ### Empacotamento (instalador Windows)
 

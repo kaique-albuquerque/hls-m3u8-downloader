@@ -3,7 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { RESOURCES_PATH_ENV } from '../src/core/binaries.js';
-import { runCliSession } from '../src/cli-flow.js';
 import { createCurlClient, findCurlImpersonate } from '../src/curlimp.js';
 import { parsePlaylistText } from '../src/hls.js';
 import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../src/mdstrm.js';
@@ -11,10 +10,14 @@ import { resolveSourceAdapterAsync } from '../src/source-adapters.js';
 import { loadConfig } from '../src/cli/config.js';
 import { friendlyReport } from '../src/core/errors.js';
 import { normalizeMediaInfo } from './media-info.js';
+import { createElectronServices } from './services.js';
 import {
   validateAnalyzePayload,
   validateDownloadPayload,
-  validateCancelPayload,
+  validateQueueEnqueuePayload,
+  validateJobIdPayload,
+  validateHistoryIdPayload,
+  validateSettingsPayload,
   validateRevealPayload,
 } from './security.js';
 
@@ -27,7 +30,13 @@ if (app.isPackaged && process.resourcesPath) {
   process.env[RESOURCES_PATH_ENV] = process.resourcesPath;
 }
 
-const downloads = new Map();
+// P11: serviços compartilhados (Core + Queue + Settings + History) criados
+// no ready() — o Electron consome StreamGrabCore/DownloadQueue diretamente,
+// sem runCliSession()/createAnswerBook() para downloads (itens 1-5 do pedido).
+let services = null;
+
+// Compatibilidade: taskId (abas) -> jobId (fila real).
+const taskToJob = new Map();
 
 // Raízes permitidas para abrir/localizar arquivos (seção 24: impede path
 // traversal e abertura de arquivos arbitrários via IPC).
@@ -60,6 +69,36 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // P11: monta os serviços com persistência real em userData
+  // (settings.json, history.json, queue.json) — itens 3-5 do pedido.
+  const userDataDir = app.getPath('userData');
+  const broadcast = (event, payload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('queue:event', { event, payload });
+    }
+  };
+
+  services = createElectronServices({
+    userDataDir,
+    onEvent: (event, payload) => broadcast(event, payload),
+  });
+
+  // Eventos do engine que a fila não re-emite: progresso, pausa/retomada,
+  // início do job, velocidade e ETA — mesmo canal `queue:event`.
+  for (const event of ['start', 'progress', 'speed', 'eta', 'pause', 'resume']) {
+    services.core.on(event, (payload) => broadcast(event, payload));
+  }
+
+  // Persistência final antes de sair (a fila salva a cada mudança de estado,
+  // mas garante aqui no encerramento).
+  app.on('before-quit', () => {
+    try {
+      services?.queue.save();
+    } catch {
+      /* ignora */
+    }
+  });
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -185,9 +224,47 @@ ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {
   }
 });
 
-ipcMain.handle('download:start', async (event, rawPayload) => {
-  // P8 (seção 24): validação completa do payload antes de iniciar qualquer
-  // processo (URL, taskId, filename sem traversal, outputDir absoluto).
+// ---------------------------------------------------------------------------
+// P11 — downloads via StreamGrabCore + DownloadQueue (itens 1-2 do pedido)
+//
+// `download:start` (botão "Baixar agora", com taskId) e `queue:enqueue`
+// (botão "Adicionar à fila") enfileiram na MESMA fila real com persistência:
+// concorrência limitada (settings.maxConcurrentDownloads), estados aguardando/
+// downloading/paused/completed/failed/cancelled, pause/resume/cancel/retry.
+// Nenhum download depende de runCliSession()/createAnswerBook().
+// ---------------------------------------------------------------------------
+
+function enqueueDownload({ url, filename, outputDir, selectedUrl, title, turbo, cookiesFile, cookiesFromBrowser, taskId }) {
+  if (!services) {
+    const err = new Error('Serviços ainda não inicializados.');
+    err.code = 'NOT_READY';
+    throw err;
+  }
+  if (outputDir) registerRevealRoot(outputDir);
+
+  const job = services.queue.enqueue(url, {
+    title: title || filename || '',
+    meta: {
+      destination: outputDir || '',
+      filename: filename || '',
+      selectedUrl: selectedUrl || '',
+      sourceUrl: url,
+      taskId: taskId || '',
+      turbo: Boolean(turbo),
+      headers: {},
+      auth: {
+        cookiesFile: cookiesFile || '',
+        cookiesFromBrowser: cookiesFromBrowser || '',
+      },
+    },
+  });
+  if (taskId) taskToJob.set(taskId, job.id);
+  services.queue.save();
+  return job;
+}
+
+ipcMain.handle('download:start', async (_event, rawPayload) => {
+  // P8 (seção 24): validação completa do payload antes de enfileirar.
   const payload = validateDownloadPayload(rawPayload);
   if (!payload) {
     const result = {
@@ -198,137 +275,181 @@ ipcMain.handle('download:start', async (event, rawPayload) => {
         suggestedAction: 'Feche e reabra a aba ou reinicie o aplicativo e tente novamente.',
       },
     };
-    event.sender.send('download:done', { taskId: rawPayload?.taskId || 'invalid', result });
     return result;
   }
-
-  const {
-    taskId,
-    url,
-    filename,
-    outputDir,
-    qualityChoice,
-    overwriteAction,
-    overwriteNewName,
-    forceCurl,
-    turbo,
-    cookiesFile,
-    cookiesFromBrowser,
-  } = payload;
-
-  if (outputDir) registerRevealRoot(outputDir);
-
-  const sender = event.sender;
-  const previous = downloads.get(taskId);
-  if (previous?.cancel) previous.cancel();
-
-  const answers = createAnswerBook({
-    url,
-    filename,
-    outputDir,
-    qualityChoice,
-    overwriteAction,
-    overwriteNewName,
-    useCurlOn403: forceCurl ? 'S' : '',
-  });
-
-  let cancel = () => {};
-  downloads.set(taskId, { cancel });
-
   try {
-    const result = await runCliSession({
-      argv: [
-        ...(forceCurl ? ['--curl-impersonate'] : []),
-        ...(cookiesFile ? ['--cookies', cookiesFile] : []),
-        ...(cookiesFromBrowser ? ['--cookies-from-browser', cookiesFromBrowser] : []),
-        ...(turbo ? ['--turbo'] : []),
-      ],
-      projectRoot: PROJECT_ROOT,
-      answers,
-      registerCancel(fn) {
-        cancel = fn;
-        downloads.set(taskId, { cancel });
-      },
-      io: createElectronIo({ sender, taskId }),
-    });
-
-    downloads.delete(taskId);
-    sender.send('download:done', { taskId, result });
-    return result;
+    const job = enqueueDownload(payload);
+    return { ok: true, jobId: job.id };
   } catch (err) {
-    downloads.delete(taskId);
-    // P11 (secao 42): relatorio normalizado (Motivo / Acao sugerida / Detalhes).
-    const result = {
-      code: 1,
-      ok: false,
-      error: friendlyReport(err),
-      stderr: err?.stack || String(err),
-    };
-    sender.send('download:done', { taskId, result });
+    const result = { code: 1, ok: false, error: friendlyReport(err) };
     return result;
   }
 });
 
+ipcMain.handle('queue:enqueue', async (_event, rawPayload) => {
+  const payload = validateQueueEnqueuePayload(rawPayload);
+  if (!payload) {
+    return { ok: false, error: { message: 'Payload de fila inválido.', suggestedAction: 'Verifique a URL e tente novamente.' } };
+  }
+  try {
+    const job = enqueueDownload(payload);
+    return { ok: true, jobId: job.id };
+  } catch (err) {
+    return { ok: false, error: friendlyReport(err) };
+  }
+});
+
+ipcMain.handle('queue:list', async () => {
+  if (!services) return { jobs: [], maxConcurrent: 3, paused: false };
+  // all(): inclui jobs terminais para a UI oferecer retry/remove.
+  const jobs = services.queue.all().map((j) => ({ ...j, meta: { ...j.meta } }));
+  return { jobs, maxConcurrent: services.queue.maxConcurrent, paused: services.queue.paused };
+});
+
+ipcMain.handle('queue:setPaused', async (_e, value) => {
+  if (!services) return { ok: false, error: 'Serviços não inicializados' };
+  services.queue.setPaused(Boolean(value));
+  await services.queue.save();
+  return { ok: true, paused: services.queue.paused };
+});
+
+ipcMain.handle('queue:pause', async (_event, rawPayload) => {
+  const payload = validateJobIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  try {
+    services.queue.pause(payload.jobId);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('queue:resume', async (_event, rawPayload) => {
+  const payload = validateJobIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  try {
+    services.queue.resume(payload.jobId);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('queue:cancel', async (_event, rawPayload) => {
+  const payload = validateJobIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  try {
+    services.queue.cancel(payload.jobId);
+    services.queue.save();
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('queue:retry', async (_event, rawPayload) => {
+  const payload = validateJobIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  try {
+    const job = services.queue.retry(payload.jobId);
+    services.queue.save();
+    return { ok: true, jobId: job.id };
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('queue:remove', async (_event, rawPayload) => {
+  const payload = validateJobIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  try {
+    services.queue.remove(payload.jobId);
+    services.queue.save();
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+// Compatibilidade com o fluxo antigo de cancelamento por taskId (abas).
+// Aceita { jobId } (fila real) ou { taskId } (mapeado para jobId).
 ipcMain.handle('download:cancel', async (_event, rawPayload) => {
-  const payload = validateCancelPayload(rawPayload);
-  if (!payload) return false;
-  const task = downloads.get(payload.taskId);
-  task?.cancel?.();
-  downloads.delete(payload.taskId);
+  if (!services) return false;
+  const payload = rawPayload && typeof rawPayload === 'object' ? rawPayload : {};
+  let jobId = typeof payload.jobId === 'string' && payload.jobId ? payload.jobId : '';
+  if (!jobId) {
+    const taskId = typeof payload.taskId === 'string' ? payload.taskId : '';
+    jobId = taskToJob.get(taskId) || '';
+  }
+  if (!jobId) return false;
+  try {
+    services.queue.cancel(jobId);
+    services.queue.save();
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P11 — Histórico e Configurações (itens 3-5 do pedido)
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('history:list', async () => {
+  if (!services) return [];
+  return services.history.list();
+});
+
+ipcMain.handle('history:remove', async (_event, rawPayload) => {
+  const payload = validateHistoryIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  services.history.remove(payload.id);
   return true;
 });
 
-function createAnswerBook({
-  url,
-  filename,
-  outputDir,
-  qualityChoice,
-  overwriteAction,
-  overwriteNewName,
-  useCurlOn403,
-}) {
-  return {
-    async ask(question) {
-      if (question.includes('URL do video/playlist')) return String(url || '');
-      if (question.includes('Escolha (Enter = melhor disponivel)')) return String(qualityChoice || '');
-      if (question.includes('Nome do arquivo')) return String(filename || 'video');
-      if (question.includes('Pasta de saida')) return String(outputDir || '');
-      if (question.includes('(S)obrescrever, (N)ovo nome, (C)ancelar?')) {
-        return normalizeOverwriteAction(overwriteAction);
-      }
-      if (question.includes('Novo nome do arquivo')) return String(overwriteNewName || filename || 'video');
-      if (question.includes('Tentar contornar com curl-impersonate')) return String(useCurlOn403 || '');
-      return '';
-    },
-  };
-}
+ipcMain.handle('history:clear', async () => {
+  if (!services) return false;
+  services.history.clear();
+  return true;
+});
 
-function normalizeOverwriteAction(value) {
-  const action = String(value || 'overwrite').toLowerCase();
-  if (action === 'rename') return 'N';
-  if (action === 'cancel') return 'C';
-  return 'S';
-}
+ipcMain.handle('history:redownload', async (_event, rawPayload) => {
+  const payload = validateHistoryIdPayload(rawPayload);
+  if (!payload || !services) return false;
+  const entry = services.history.get(payload.id);
+  if (!entry) return { ok: false, error: 'Entrada não encontrada no histórico.' };
+  try {
+    const destination = typeof entry.destination === 'string' && entry.destination ? entry.destination : '';
+    const dir = destination ? path.dirname(destination) : '';
+    const base = destination ? path.basename(destination, path.extname(destination)) : '';
+    const job = enqueueDownload({
+      url: entry.url,
+      filename: base,
+      outputDir: dir,
+      title: entry.title || '',
+    });
+    return { ok: true, jobId: job.id };
+  } catch (err) {
+    return { ok: false, error: friendlyReport(err) };
+  }
+});
 
-function createElectronIo({ sender, taskId }) {
-  return {
-    log: (...parts) => {
-      sender.send('download:log', { taskId, stream: 'stdout', line: parts.join(' ') });
-    },
-    error: (...parts) => {
-      sender.send('download:log', { taskId, stream: 'stderr', line: parts.join(' ') });
-    },
-    onStatus: (text) => {
-      sender.send('download:status', { taskId, text });
-    },
-    onState: ({ state, label, output, targetUrl }) => {
-      sender.send('download:state', { taskId, state, label, output, targetUrl });
-    },
-    onProgress: (payload) => {
-      sender.send('download:progress', { taskId, ...payload });
-    },
-    onProgressEnd: () => {
-      sender.send('download:progress', { taskId, key: 'progress', value: 'end' });
-    },
-  };
-}
+ipcMain.handle('settings:get', async () => {
+  if (!services) return {};
+  return services.settings.all();
+});
+
+ipcMain.handle('settings:update', async (_event, rawPayload) => {
+  if (!services) return null;
+  const clean = validateSettingsPayload(rawPayload);
+  if (!clean) return null;
+  return services.applySettings(clean);
+});
+
+ipcMain.handle('settings:reset', async () => {
+  if (!services) return null;
+  const updated = services.settings.reset();
+  services.queue.setMaxConcurrent(updated.maxConcurrentDownloads);
+  services.queue.save();
+  return updated;
+});
