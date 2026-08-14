@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * P2.1 — Domain Models (src/core/models.js)
  *
