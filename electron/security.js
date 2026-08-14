@@ -191,6 +191,14 @@ export function validateQueueEnqueuePayload(payload = {}) {
   const cookiesFile = typeof payload?.cookiesFile === 'string' ? payload.cookiesFile : '';
   const cookiesFromBrowser = typeof payload?.cookiesFromBrowser === 'string' ? payload.cookiesFromBrowser : '';
 
+  // P12.1: audio/subtitle selections
+  const audioLanguage = typeof payload?.audioLanguage === 'string' ? payload.audioLanguage.trim() : '';
+  const allAudio = payload?.allAudio === true;
+  const subtitleLanguages = Array.isArray(payload?.subtitleLanguages)
+    ? payload.subtitleLanguages.filter((s) => typeof s === 'string').slice(0, 20)
+    : [];
+  const embedSubs = payload?.embedSubs === true;
+
   return {
     url,
     filename,
@@ -201,6 +209,10 @@ export function validateQueueEnqueuePayload(payload = {}) {
     qualityChoice,
     cookiesFile,
     cookiesFromBrowser,
+    audioLanguage,
+    allAudio,
+    subtitleLanguages,
+    embedSubs,
   };
 }
 

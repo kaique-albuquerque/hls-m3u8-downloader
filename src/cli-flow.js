@@ -28,7 +28,7 @@ import {
   resolveExistingFile,
 } from './cli/ui.js';
 import { loadConfig, parseCliHeaders, parseCliAuth, isGoogleVideoPlaybackUrl, collectDevtoolsHeaders } from './cli/config.js';
-import { runDownloadFlow, runMuxedDownloadFlow } from './cli/download.js';
+import { runDownloadFlow, runMuxedDownloadFlow, runMuxMultiDownloadFlow } from './cli/download.js';
 import { runTurboDownloadFlow, runTurboMuxedDownloadFlow, DEFAULT_TURBO_CHUNKS } from './cli/turbo.js';
 import { runCurlDownloadFlow } from './cli/curl-flow.js';
 
@@ -92,6 +92,21 @@ export async function runCliSession({
   };
   if (auth.cookiesFile) safeIo.log(`[auth] Usando cookies do arquivo: ${auth.cookiesFile}`);
   if (auth.cookiesFromBrowser) safeIo.log(`[auth] Usando cookies do navegador: ${auth.cookiesFromBrowser}`);
+
+  // P12.1: multi-audio and subtitle flags
+  const audioLanguageIdx = argv.indexOf('--audio-lang');
+  const audioLanguage = audioLanguageIdx !== -1 ? (argv[audioLanguageIdx + 1] || '') : '';
+  const allAudio = argv.includes('--all-audio');
+  const subsIdx = argv.indexOf('--subs');
+  const subLanguages = subsIdx !== -1
+    ? (argv[subsIdx + 1] === 'all' ? ['all'] : (argv[subsIdx + 1] || '').split(',').map((s) => s.trim()).filter(Boolean))
+    : [];
+  const embedSubs = argv.includes('--embed-subs');
+
+  if (audioLanguage) safeIo.log(`[audio] Idioma selecionado: ${audioLanguage}`);
+  if (allAudio) safeIo.log('[audio] Modo multi-audio ativado (todas as faixas)');
+  if (subLanguages.length) safeIo.log(`[subs] Legendas selecionadas: ${subLanguages.join(', ')}`);
+  if (embedSubs) safeIo.log('[subs] Legendas serao embutidas no video');
 
   // Modo turbo (download paralelo por partes): flag de CLI tem prioridade sobre config.json.
   const turboEnabled = !legacyFlow && (argv.includes('--turbo') ? true : config.turbo === true);
@@ -310,6 +325,9 @@ export async function runCliSession({
       analysis: info,
       selectedUrl: targetUrl,
       auth,
+      // P12.1: pass audio/subtitle options to adapter
+      audioLanguage: audioLanguage || undefined,
+      allAudio: allAudio || false,
     });
     targetUrl = preparedPlan?.downloadUrl || targetUrl;
   } catch (err) {
@@ -342,6 +360,20 @@ export async function runCliSession({
     } else {
       result = await runMuxedDownloadFlow(ctx, muxOpts);
     }
+  } else if (preparedPlan?.strategy === 'mux-multi') {
+    // P12.1: multi-audio download — download video + all audio tracks, then mux
+    const muxMultiOpts = {
+      videoUrl: preparedPlan.videoUrl,
+      audioUrls: preparedPlan.audioUrls || [],
+      audioLabels: preparedPlan.audioLabels || [],
+      audioLanguages: preparedPlan.audioLanguages || [],
+      output,
+      headers,
+      totalBytes: preparedPlan.totalBytes,
+      durationMs: preparedPlan.durationMs,
+    };
+    safeIo.log(`\nBaixando video + ${muxMultiOpts.audioUrls.length} faixa(s) de audio...`);
+    result = await runMuxMultiDownloadFlow(ctx, muxMultiOpts);
   } else if (turboEnabled && turboEligible) {
     result = await runTurboDownloadFlow(ctx, {
       url: targetUrl,

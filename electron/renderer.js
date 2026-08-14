@@ -88,6 +88,15 @@ function addTab({ copyFrom } = {}) {
     metaBitrate: panel.querySelector('[data-field="metaBitrate"]'),
     metaSize: panel.querySelector('[data-field="metaSize"]'),
     turbo: panel.querySelector('[data-field="turbo"]'),
+    // P12.1: audio/subtitle UI elements
+    audioSubtitleSection: panel.querySelector('[data-field="audioSubtitleSection"]'),
+    audioTracksContainer: panel.querySelector('[data-field="audioTracksContainer"]'),
+    audioTrackSelect: panel.querySelector('[data-field="audioTrackSelect"]'),
+    allAudio: panel.querySelector('[data-field="allAudio"]'),
+    subtitleTracksContainer: panel.querySelector('[data-field="subtitleTracksContainer"]'),
+    subtitleCheckboxes: panel.querySelector('[data-field="subtitleCheckboxes"]'),
+    embedSubs: panel.querySelector('[data-field="embedSubs"]'),
+    noTracksMessage: panel.querySelector('[data-field="noTracksMessage"]'),
   };
 
   fields.outputDir.value = defaultOutputDir;
@@ -110,6 +119,8 @@ function addTab({ copyFrom } = {}) {
     selectedQuality: null,
     selectedVariantUri: '',
     qualities: [],
+    audioTracks: [],      // P12.1: audio tracks from analysis
+    subtitleTracks: [],   // P12.1: subtitle tracks from analysis
     sourceUrl: '',
     analysisBaseUrl: '',
     media: null,
@@ -205,7 +216,11 @@ function addTab({ copyFrom } = {}) {
       state.sourceUrl = info.workingUrl || url;
       state.analysisBaseUrl = info.baseUrl || info.media?.baseUrl || url;
       state.media = info.media || null;
+      // P12.1: store audio/subtitle tracks from raw analysis
+      state.audioTracks = info.media?.audioTracks || info.audioTracks || [];
+      state.subtitleTracks = info.media?.subtitleTracks || info.subtitleTracks || [];
       renderMediaInfo(state);
+      renderAudioSubtitleTracks(state);
 
       if (info.kind === 'master' || info.kind === 'youtube' || info.kind === 'ytdlp') {
         state.qualities = info.variants;
@@ -408,6 +423,11 @@ async function enqueueForTab(state, { lockNow }) {
     turbo: fields.turbo?.checked === true,
     qualityChoice,
     taskId: state.taskId,
+    // P12.1: audio/subtitle selections
+    audioLanguage: state.selectedAudioLanguage || '',
+    allAudio: fields.allAudio?.checked === true,
+    subtitleLanguages: state.selectedSubtitleLanguages || [],
+    embedSubs: fields.embedSubs?.checked === true,
   });
 
   if (!result || !result.ok) {
@@ -489,6 +509,81 @@ function renderQualities(state, emptyLabel = 'Nenhuma URL analisada ainda.') {
 
 function setStatus(state, text) {
   state.fields.status.textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// P12.1: Audio track + subtitle rendering
+// ---------------------------------------------------------------------------
+
+function renderAudioSubtitleTracks(state) {
+  const { audioTracks, subtitleTracks } = state;
+  const section = state.fields.audioSubtitleSection;
+  const audioContainer = state.fields.audioTracksContainer;
+  const subtitleContainer = state.fields.subtitleTracksContainer;
+  const noTracksMsg = state.fields.noTracksMessage;
+  const audioSelect = state.fields.audioTrackSelect;
+  const subtitleBoxes = state.fields.subtitleCheckboxes;
+
+  // Show/hide the section
+  const hasAudio = audioTracks.length > 1; // only show selector if multiple tracks
+  const hasSubs = subtitleTracks.length > 0;
+
+  if (!hasAudio && !hasSubs) {
+    section.hidden = true;
+    return;
+  }
+
+  section.hidden = false;
+
+  // -- Audio tracks --
+  if (hasAudio) {
+    audioContainer.hidden = false;
+    noTracksMsg.hidden = true;
+    audioSelect.innerHTML = '';
+
+    audioTracks.forEach((track) => {
+      const opt = document.createElement('option');
+      opt.value = track.language;
+      opt.textContent = `${track.label || track.language}${track.isDefault ? ' (padrão)' : ''}`;
+      if (track.isDefault) opt.selected = true;
+      audioSelect.appendChild(opt);
+    });
+
+    // Update state on change
+    audioSelect.addEventListener('change', () => {
+      state.selectedAudioLanguage = audioSelect.value;
+    });
+    state.selectedAudioLanguage = audioSelect.value;
+  } else {
+    audioContainer.hidden = true;
+  }
+
+  // -- Subtitle tracks --
+  if (hasSubs) {
+    subtitleContainer.hidden = false;
+    noTracksMsg.hidden = true;
+    subtitleBoxes.innerHTML = '';
+
+    subtitleTracks.forEach((track) => {
+      const label = document.createElement('label');
+      label.className = 'checkbox-inline';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = track.language;
+      cb.checked = track.isDefault;
+      cb.addEventListener('change', () => {
+        state.selectedSubtitleLanguages = [...subtitleBoxes.querySelectorAll('input:checked')].map((el) => el.value);
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(` ${track.label || track.language}${track.isAutoGenerated ? ' (auto)' : ''}`));
+      subtitleBoxes.appendChild(label);
+    });
+
+    // Initialize selection
+    state.selectedSubtitleLanguages = [...subtitleBoxes.querySelectorAll('input:checked')].map((el) => el.value);
+  } else {
+    subtitleContainer.hidden = true;
+  }
 }
 
 function formatUiError(error) {

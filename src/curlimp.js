@@ -113,8 +113,13 @@ export function killAllCurl() {
  *   const { text, finalUrl } = await client.getText(url);  // baixa e lê texto
  *
  * fetch retorna { ok, code, httpCode, finalUrl, stderr }.
+ *
+ * Opcoes:
+ *  - registerActive: Set<ChildProcess> para registrar processos filhos.
+ *    Quando fornecido, os processos sao adicionados a esse Set (em vez do
+ *    Set global `active`), permitindo tracking per-instance no transport.
  */
-export function createCurlClient({ cmd, headers = {}, profile }) {
+export function createCurlClient({ cmd, headers = {}, profile, registerActive } = {}) {
   const headerArgs = [];
   for (const [k, v] of Object.entries(headers || {})) {
     if (v && String(v).trim()) headerArgs.push('-H', `${k}: ${String(v).trim()}`);
@@ -124,6 +129,10 @@ export function createCurlClient({ cmd, headers = {}, profile }) {
   const impersonateArgs = profile
     ? ['--impersonate', profile, '--compressed']
     : [];
+
+  // Set alvo para tracking de processos: per-instance quando fornecido,
+  // global (`active`) quando nao — preserva comportamento legado.
+  const target = registerActive || active;
 
   function run(url, outPath, timeoutMs) {
     return new Promise((resolve) => {
@@ -147,7 +156,7 @@ export function createCurlClient({ cmd, headers = {}, profile }) {
         return;
       }
 
-      active.add(child);
+      target.add(child);
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', (d) => {
@@ -157,11 +166,11 @@ export function createCurlClient({ cmd, headers = {}, profile }) {
         stderr = (stderr + d.toString()).slice(-20000);
       });
       child.on('error', (err) => {
-        active.delete(child);
+        target.delete(child);
         resolve({ ok: false, code: -1, httpCode: '', finalUrl: '', stderr: String(err.message || err) });
       });
       child.on('close', (code) => {
-        active.delete(child);
+        target.delete(child);
         const lines = stdout.split(/\r?\n/);
         const httpCode = (lines[0] || '').trim();
         const finalUrl = (lines[1] || '').trim();

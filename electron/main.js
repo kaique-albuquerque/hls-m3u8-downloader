@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { RESOURCES_PATH_ENV } from '../src/core/binaries.js';
 import { createCurlClient, findCurlImpersonate } from '../src/curlimp.js';
 import { parsePlaylistText } from '../src/hls.js';
-import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../src/mdstrm.js';
+import { isMdstrmUrl } from '../src/mdstrm.js';
 import { resolveSourceAdapterAsync } from '../src/source-adapters.js';
 import { loadConfig } from '../src/cli/config.js';
 import { normalizeHeaders } from '../src/utils.js';
 import { friendlyReport } from '../src/core/errors.js';
+import { safeRefreshMdstrm } from '../src/core/mdstrm-routing.js';
 import { normalizeMediaInfo } from './media-info.js';
 import { createElectronServices } from './services.js';
 import {
@@ -146,6 +147,15 @@ ipcMain.handle('app:show-in-folder', async (_event, payload) => {
   return { ok: true };
 });
 
+// P4.1: export diagnostic log to file
+ipcMain.handle('app:export-logs', async (_event, payload) => {
+  const { exportLogs, defaultLogPath } = await import('../src/core/log-export.js');
+  const logger = services?.core?.events ? services.core : null;
+  const buffer = logger?.getBuffer?.() || [];
+  const dest = payload?.path || defaultLogPath(app.getPath('userData'));
+  return exportLogs(buffer, dest);
+});
+
 async function analyzePlaylist(rawPayload) {
   // P8 (seção 24): validação da mensagem IPC antes de qualquer processamento.
   const payload = validateAnalyzePayload(rawPayload);
@@ -187,16 +197,9 @@ async function analyzePlaylist(rawPayload) {
     // qualquer cliente. Converte para a URL do player usando o embed público —
     // funciona SEM curl-impersonate (fetch nativo); com curl, usa o cliente
     // para imitar o TLS quando o CDN exige navegador real.
-    if (isMdstrmUrl(url) && needsMdstrmRefresh(url)) {
-      const videoId = extractMdstrmVideoId(url);
-      if (videoId) {
-        const client = found ? createCurlClient({ cmd: found.cmd, headers: mergedHeaders, profile: found.profile }) : null;
-        try {
-          workingUrl = await refreshMdstrmUrl(url, client);
-        } catch {
-          // embed público indisponível — segue com a URL original
-        }
-      }
+    if (isMdstrmUrl(url)) {
+      const client = found ? createCurlClient({ cmd: found.cmd, headers: mergedHeaders, profile: found.profile }) : null;
+      workingUrl = await safeRefreshMdstrm(url, client);
     }
 
     try {
@@ -244,7 +247,7 @@ ipcMain.handle('playlist:analyze', async (_event, rawPayload) => {
 // Nenhum download depende de runCliSession()/createAnswerBook().
 // ---------------------------------------------------------------------------
 
-function enqueueDownload({ url, filename, outputDir, selectedUrl, title, turbo, cookiesFile, cookiesFromBrowser, taskId }) {
+function enqueueDownload({ url, filename, outputDir, selectedUrl, title, turbo, cookiesFile, cookiesFromBrowser, taskId, audioLanguage, allAudio, subtitleLanguages, embedSubs }) {
   if (!services) {
     const err = new Error('Serviços ainda não inicializados.');
     err.code = 'NOT_READY';
@@ -270,6 +273,11 @@ function enqueueDownload({ url, filename, outputDir, selectedUrl, title, turbo, 
         cookiesFile: cookiesFile || config.cookiesFile || '',
         cookiesFromBrowser: cookiesFromBrowser || config.cookiesFromBrowser || '',
       },
+      // P12.1: audio/subtitle selections
+      audioLanguage: audioLanguage || '',
+      allAudio: Boolean(allAudio),
+      subtitleLanguages: Array.isArray(subtitleLanguages) ? subtitleLanguages : [],
+      embedSubs: Boolean(embedSubs),
     },
   });
   if (taskId) taskToJob.set(taskId, job.id);

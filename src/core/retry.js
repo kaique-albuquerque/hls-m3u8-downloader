@@ -129,7 +129,7 @@ export async function retryWithBackoff({
       await sleep(delay, signal);
     }
   }
-  throw new Error('retryWithBackoff: inalcancavel'); // eslint-disable-line no-unreachable
+  throw new Error('retryWithBackoff: inalcancavel');  
 }
 
 export default { retryWithBackoff, computeBackoffDelay, parseRetryAfter, retryAfterFromError, sleep };

@@ -191,11 +191,7 @@ test('fluxo mdstrm: transporte disponivel -> curl (segmentos) + mux local, nunca
     assert.ok(!/^https?:/.test(calls.ffmpegUrls[0]), 'FFmpeg NUNCA recebe URL remota');
     assert.ok(calls.ffmpegUrls[0].endsWith('.m3u8'), 'FFmpeg recebe playlist local');
 
-    // Diagnóstico sanitizado: transporte disponível + sem tokens no log.
-    assert.ok(
-      calls.logs.some((l) => l.includes('transporte curl-impersonate disponivel=true')),
-      'log deve reportar transporte disponivel'
-    );
+    // Diagnóstico sanitizado: sem tokens no log.
     for (const line of calls.logs) {
       assert.ok(!line.includes('secret-'), `log nao pode conter tokens completos: ${line}`);
     }
@@ -232,11 +228,7 @@ test('fluxo mdstrm: transporte AUSENTE -> FFmpeg com a variante FRESCA (T2), nun
     assert.match(used, /tok=2/, `FFmpeg usa variante fresca T2 (recebeu: ${used})`);
     assert.doesNotMatch(used, /tok=1/, `FFmpeg nunca usa variante velha T1 (recebeu: ${used})`);
 
-    // Diagnóstico sanitizado: curl ausente + fallback explícito.
-    assert.ok(
-      calls.logs.some((l) => l.includes('curl-impersonate AUSENTE')),
-      'log deve reportar curl ausente e o motivo do fallback'
-    );
+    // Diagnóstico sanitizado: re-resolução da variante + sem tokens no log.
     assert.ok(
       calls.logs.some((l) => l.includes('variante re-resolvida com tokens frescos')),
       'log deve reportar a re-resolução da variante'

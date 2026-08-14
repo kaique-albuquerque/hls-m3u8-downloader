@@ -57,12 +57,13 @@ export function redact(value) {
 }
 
 /**
- * Cria um logger com redacao automatica.
- * - level: debug|info|warn|error (filtro por nivel).
- * - sink: objeto { debug, info, warn, error } (default: console).
- *   Injete um sink nos testes para capturar as mensagens ja redigidas.
+ * Creates a logger with automatic redaction and an in-memory circular buffer.
+ * - level: debug|info|warn|error (filter by level).
+ * - sink: object { debug, info, warn, error } (default: console).
+ *   Inject a sink in tests to capture already-redacted messages.
+ * - bufferSize: max entries kept in memory for export (default: 1000).
  */
-export function createLogger({ level = 'info', sink } = {}) {
+export function createLogger({ level = 'info', sink, bufferSize = 1000 } = {}) {
   const threshold = LOG_LEVELS[level] ?? LOG_LEVELS.info;
   const write = sink || {
     debug: (...args) => console.debug(...args),
@@ -71,10 +72,23 @@ export function createLogger({ level = 'info', sink } = {}) {
     error: (...args) => console.error(...args),
   };
 
+  // Circular buffer for log export (Sprint 4.1)
+  const buffer = [];
+  const maxBuffer = Math.max(1, bufferSize);
+
   const log = (lvl, args) => {
     if ((LOG_LEVELS[lvl] ?? 0) < threshold) return;
     const fn = write[lvl] || write.info;
-    fn(...args.map((a) => (typeof a === 'string' ? redactText(a) : redact(a))));
+    const redacted = args.map((a) => (typeof a === 'string' ? redactText(a) : redact(a)));
+    fn(...redacted);
+
+    // Buffer entry for export
+    if (buffer.length >= maxBuffer) buffer.shift();
+    buffer.push({
+      timestamp: new Date().toISOString(),
+      level: lvl,
+      message: redacted.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
+    });
   };
 
   return {
@@ -86,6 +100,10 @@ export function createLogger({ level = 'info', sink } = {}) {
     redact,
     redactText,
     redactHeaders,
+    /** Returns a copy of the in-memory log buffer (for export). */
+    getBuffer: () => [...buffer],
+    /** Clears the in-memory log buffer. */
+    clearBuffer: () => { buffer.length = 0; },
   };
 }
 

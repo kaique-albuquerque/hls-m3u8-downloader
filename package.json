@@ -22,6 +22,7 @@
     "test:integration": "node --experimental-test-module-mocks --test \"tests/integration/*.test.js\"",
     "test:e2e": "node tests/e2e/curl-e2e.mjs",
     "lint": "eslint .",
+    "audit": "npm audit --omit=dev 2>&1 || echo '[audit] Vulnerabilities found — review above'",
     "format": "prettier --write .",
     "ffmpeg:install": "node scripts/install-ffmpeg.mjs",
     "pack:resources": "node scripts/package-resources.mjs",

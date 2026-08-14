@@ -65,6 +65,10 @@ export function printSubcommandHelp(io) {
   io.log('  --filename <nome>            Nome do arquivo (sem extensao)');
   io.log('  --format <n|id>              Qualidade: indice 1..n ou formatId (ex.: 137)');
   io.log('  --audio-only                 Baixa apenas o audio');
+  io.log('  --audio-lang <code>          Idioma do audio (ex: pt, en). Default: melhor disponivel');
+  io.log('  --all-audio                  Baixa todas as faixas de audio (mux multi-audio)');
+  io.log('  --subs <lang1,lang2>         Baixar legendas (ex: pt,en). --subs all = todas');
+  io.log('  --embed-subs                 Embutir legendas no video (hardcoded)');
   io.log('  --turbo                      Download paralelo por partes (URLs diretas)');
   io.log('  --chunks <n>                 Conexoes do turbo (padrao: 8)');
   io.log('  --no-resume                  Desliga resume do turbo (descarta parcial)');
@@ -92,6 +96,10 @@ export function parseDownloadFlags(rest = []) {
     filename: '',
     format: '',
     audioOnly: false,
+    audioLanguage: '',   // P12.1: --audio-lang <code>
+    allAudio: false,     // P12.1: --all-audio
+    subLanguages: [],    // P12.1: --subs <lang1,lang2>
+    embedSubs: false,    // P12.1: --embed-subs
     turbo: false,
     chunks: 0,
     noResume: false,
@@ -106,6 +114,13 @@ export function parseDownloadFlags(rest = []) {
     else if (arg === '--filename') flags.filename = rest[++i] || '';
     else if (arg === '--format' || arg === '-f') flags.format = rest[++i] || '';
     else if (arg === '--audio-only') flags.audioOnly = true;
+    else if (arg === '--audio-lang') flags.audioLanguage = rest[++i] || '';
+    else if (arg === '--all-audio') flags.allAudio = true;
+    else if (arg === '--subs') {
+      const val = rest[++i] || '';
+      flags.subLanguages = val === 'all' ? ['all'] : val.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    else if (arg === '--embed-subs') flags.embedSubs = true;
     else if (arg === '--turbo') flags.turbo = true;
     else if (arg === '--chunks') flags.chunks = Number(rest[++i]) || 0;
     else if (arg === '--no-resume') flags.noResume = true;

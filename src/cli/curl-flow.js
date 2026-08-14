@@ -1,50 +1,30 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { installCurlImpersonate } from '../curlimp-install.js';
 import { CurlImpersonateTransport, rewritePlaylist as _rewritePlaylist, extForUri as _extForUri } from '../transports/curl.js';
 import { parsePlaylistText } from '../hls.js';
-import { isMdstrmUrl, needsMdstrmRefresh, extractMdstrmVideoId, refreshMdstrmUrl } from '../mdstrm.js';
+import { isMdstrmUrl } from '../mdstrm.js';
 import { formatBytes, maskUrl } from '../utils.js';
 import { runDownloadFlow } from './download.js';
 import { chooseVariant, print403, printCurlImpHelp } from './ui.js';
+import { resolveTransportWithAutoInstall, safeRefreshMdstrm } from '../core/mdstrm-routing.js';
 
 // Re-exportados do transporte (P4) para manter a API publica deste modulo.
 export const rewritePlaylist = _rewritePlaylist;
 export const extForUri = _extForUri;
 
 export async function runCurlDownloadFlow(ctx, { ask, url, output, headers }) {
-  let transport = CurlImpersonateTransport.resolve({ headers });
-  if (!transport) {
-    ctx.io.log('\n[curl-impersonate] Binario ausente. Tentando instalar automaticamente...');
-    try {
-      await installCurlImpersonate({ projectRoot: process.cwd(), io: ctx.io });
-    } catch (err) {
-      ctx.io.log(`[curl-impersonate] Falha na instalacao automatica: ${err.message}`);
-    }
-    transport = CurlImpersonateTransport.resolve({ headers });
-  }
+  const transport = await resolveTransportWithAutoInstall({
+    headers,
+    onLog: (msg) => ctx.io.log(msg),
+  });
   if (!transport) {
     printCurlImpHelp(ctx.io);
     return { ok: false, error: 'curl-ausente' };
   }
   ctx.io.log(`\nModo curl-impersonate - usando ${transport.name}${transport.profile ? ` (perfil ${transport.profile})` : ''}.`);
 
-  let workingUrl = url;
-  if (isMdstrmUrl(url) && needsMdstrmRefresh(url)) {
-    const videoId = extractMdstrmVideoId(url);
-    if (videoId) {
-      ctx.io.log(`\n[mdstrm] URL da Media Stream detectada (videoId ${videoId}).`);
-      ctx.io.log('[mdstrm] Buscando credenciais do player no embed publico...');
-      try {
-        workingUrl = await refreshMdstrmUrl(url, transport.client);
-        ctx.io.log(`[mdstrm] URL do player gerada: ${maskUrl(workingUrl)}`);
-      } catch (err) {
-        ctx.io.log(`[mdstrm] Nao foi possivel converter: ${err.message}`);
-        ctx.io.log('[mdstrm] Continuando com a URL original.');
-      }
-    }
-  }
+  const workingUrl = await safeRefreshMdstrm(url, transport.client, (msg) => ctx.io.log(msg));
 
   let masterText;
   let masterFinal;

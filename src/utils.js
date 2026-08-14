@@ -3,73 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-// Parâmetros de query considerados sensíveis — os valores serão mascarados
-// em qualquer exibição ou log (nunca registramos a URL completa).
-const SENSITIVE_PARAMS =
-  /^(token|access_token|authorization|auth|sid|uid|signature|sig|key|api[_-]?key|secret|password|pass|pwd|session|session_id|jwt)$/i;
+// Re-exports from focused modules (Sprint 2.3) — backward compatible.
+export { DEFAULT_USER_AGENT, normalizeUrl, isValidM3u8Url, maskUrl } from './core/url-utils.js';
+export { formatBytes, formatKbps } from './core/format-utils.js';
+export { normalizeHeaders } from './core/header-utils.js';
+
+// ---------------------------------------------------------------------------
+// Remaining utilities (to be migrated to focused modules incrementally)
+// ---------------------------------------------------------------------------
 
 // Caracteres inválidos em nomes de arquivo no Windows.
 const WINDOWS_INVALID_CHARS = /[<>:"/\\|?*]/g;
 
 // Nomes reservados pelo Windows (CON, PRN, AUX, NUL, COM1..9, LPT1..9).
 const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
-
-// Escapes acidentais típicos de formatação Markdown (\&, \_, \?, \= etc.).
-const MARKDOWN_ESCAPES = /\\([&_?=%*#!.\-()\[\]{}~])/g;
-
-// Normaliza a grafia dos headers mais comuns.
-const CANONICAL_HEADERS = {
-  referer: 'Referer',
-  origin: 'Origin',
-  'user-agent': 'User-Agent',
-};
-
-/**
- * User-Agent padrao para requisicoes fetch.
- * O fetch do Node (undici) nao envia User-Agent por padrao e varios CDNs/WAFs
- * rejeitam com 403 requisicoes sem UA — mesmo comportamento do FFmpeg (que
- * sempre envia um) e do probe de content-type.
- */
-export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
-
-/**
- * Limpa a entrada colada pelo usuário:
- * - extrai a URL real de um link Markdown `[texto](url)`;
- * - remove aspas, colchetes e escapes acidentais de Markdown.
- */
-export function normalizeUrl(raw) {
-  let s = String(raw ?? '').trim();
-  if (!s) return '';
-
-  // Link Markdown: [texto](url) → extrai a URL de dentro dos parênteses.
-  const md = s.match(/\[([^\]]*)\]\(([^)]*)\)/);
-  if (md) {
-    const inside = (md[2] || '').trim() || (md[1] || '').trim();
-    if (inside) s = inside;
-  }
-
-  // Remove sobras de aspas, `< >`, `( )` etc. vindas da cópia.
-  s = s.replace(/^[<("'`]+|[>)"'`]+$/g, '');
-  s = s.replace(/^\[/, '').replace(/\]$/, '');
-
-  // Remove escapes acidentais de Markdown: \&, \_, \?, \=, \%, etc.
-  s = s.replace(MARKDOWN_ESCAPES, '$1');
-
-  return s.trim();
-}
-
-/**
- * Valida se o valor parece uma URL HTTP/HTTPS de playlist HLS (.m3u8).
- */
-export function isValidM3u8Url(value) {
-  try {
-    const u = new URL(value);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    return u.pathname.includes('.m3u8');
-  } catch {
-    return false;
-  }
-}
 
 const DIRECT_MEDIA_EXTENSIONS = new Set(['mp4', 'webm', 'mkv', 'mov', 'm4v', 'ts']);
 
@@ -110,51 +57,22 @@ export function isYouTubeUrl(value) {
  * Qualquer um deles é roteado para o adaptador social (motor yt-dlp).
  */
 export const SOCIAL_HOSTS = new Set([
-  'facebook.com',
-  'www.facebook.com',
-  'm.facebook.com',
-  'fb.watch',
-  'www.fb.watch',
-  'instagram.com',
-  'www.instagram.com',
-  'tiktok.com',
-  'www.tiktok.com',
-  'vm.tiktok.com',
-  'x.com',
-  'www.x.com',
-  'twitter.com',
-  'www.twitter.com',
-  'mobile.twitter.com',
-  'reddit.com',
-  'www.reddit.com',
-  'old.reddit.com',
-  'v.redd.it',
-  'linkedin.com',
-  'www.linkedin.com',
-  'twitch.tv',
-  'www.twitch.tv',
-  'clips.twitch.tv',
-  'vimeo.com',
-  'www.vimeo.com',
-  'player.vimeo.com',
-  'dailymotion.com',
-  'www.dailymotion.com',
-  'dai.ly',
-  'bilibili.com',
-  'www.bilibili.com',
-  'vk.com',
-  'm.vk.com',
-  'pinterest.com',
-  'www.pinterest.com',
-  'pin.it',
-  'rumble.com',
-  'www.rumble.com',
-  'odysee.com',
-  'www.odysee.com',
-  'streamable.com',
-  'www.streamable.com',
-  'vidmoly.me',
-  'www.vidmoly.me',
+  'facebook.com', 'www.facebook.com', 'm.facebook.com', 'fb.watch', 'www.fb.watch',
+  'instagram.com', 'www.instagram.com',
+  'tiktok.com', 'www.tiktok.com', 'vm.tiktok.com',
+  'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com', 'mobile.twitter.com',
+  'reddit.com', 'www.reddit.com', 'old.reddit.com', 'v.redd.it',
+  'linkedin.com', 'www.linkedin.com',
+  'twitch.tv', 'www.twitch.tv', 'clips.twitch.tv',
+  'vimeo.com', 'www.vimeo.com', 'player.vimeo.com',
+  'dailymotion.com', 'www.dailymotion.com', 'dai.ly',
+  'bilibili.com', 'www.bilibili.com',
+  'vk.com', 'm.vk.com',
+  'pinterest.com', 'www.pinterest.com', 'pin.it',
+  'rumble.com', 'www.rumble.com',
+  'odysee.com', 'www.odysee.com',
+  'streamable.com', 'www.streamable.com',
+  'vidmoly.me', 'www.vidmoly.me',
   'videos.pexels.com',
 ]);
 
@@ -168,18 +86,13 @@ export function isSocialMediaUrl(value) {
 }
 
 const SOCIAL_LABELS = {
-  'facebook.com': 'Facebook',
-  'fb.watch': 'Facebook',
+  'facebook.com': 'Facebook', 'fb.watch': 'Facebook',
   'instagram.com': 'Instagram',
-  'tiktok.com': 'TikTok',
-  'vm.tiktok.com': 'TikTok',
-  'x.com': 'X (Twitter)',
-  'twitter.com': 'X (Twitter)',
-  'reddit.com': 'Reddit',
-  'v.redd.it': 'Reddit',
+  'tiktok.com': 'TikTok', 'vm.tiktok.com': 'TikTok',
+  'x.com': 'X (Twitter)', 'twitter.com': 'X (Twitter)',
+  'reddit.com': 'Reddit', 'v.redd.it': 'Reddit',
   'linkedin.com': 'LinkedIn',
-  'twitch.tv': 'Twitch',
-  'clips.twitch.tv': 'Twitch',
+  'twitch.tv': 'Twitch', 'clips.twitch.tv': 'Twitch',
   'vimeo.com': 'Vimeo',
   'dailymotion.com': 'Dailymotion',
   'bilibili.com': 'Bilibili',
@@ -203,23 +116,6 @@ export function socialLabelForUrl(value) {
     return 'rede social';
   } catch {
     return 'rede social';
-  }
-}
-
-/**
- * Mascara valores de parâmetros sensíveis na query string,
- * mantendo o restante visível. Ex.:
- *   https://.../index.m3u8?cP=1997000&access_token=***&sid=***
- */
-export function maskUrl(value) {
-  try {
-    const u = new URL(value);
-    for (const key of [...u.searchParams.keys()]) {
-      if (SENSITIVE_PARAMS.test(key)) u.searchParams.set(key, '***');
-    }
-    return u.toString();
-  } catch {
-    return String(value);
   }
 }
 
@@ -260,36 +156,6 @@ export function getDefaultDownloadsDir() {
     }
   }
   return home;
-}
-
-/** Formata bytes para B/KB/MB/GB/TB. */
-export function formatBytes(bytes) {
-  const n = Number(bytes);
-  if (!Number.isFinite(n) || n <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
-  const v = n / 1024 ** i;
-  return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
-}
-
-/** Formata bandwidth (bps) do HLS para Kbps/Mbps. */
-export function formatKbps(bandwidth) {
-  const n = Number(bandwidth) || 0;
-  if (!n) return '';
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} Mbps`;
-  return `${Math.round(n / 1000)} Kbps`;
-}
-
-/** Normaliza grafia de headers (ex.: "user-agent" → "User-Agent") e remove vazios. */
-export function normalizeHeaders(headers) {
-  const out = {};
-  for (const [k, v] of Object.entries(headers || {})) {
-    const value = String(v ?? '').trim();
-    if (!value) continue;
-    const lower = k.toLowerCase();
-    out[CANONICAL_HEADERS[lower] || k] = value;
-  }
-  return out;
 }
 
 /**

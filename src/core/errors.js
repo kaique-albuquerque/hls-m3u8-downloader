@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * P2.2 — Taxonomia de erros (src/core/errors.js)
  *

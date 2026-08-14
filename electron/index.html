@@ -289,6 +289,31 @@
             </div>
           </section>
 
+          <section class="card audio-subtitle-card" data-field="audioSubtitleSection" hidden>
+            <div class="section-heading">🎵 Áudio e Legendas</div>
+            <div class="audio-subtitle-content">
+              <div data-field="audioTracksContainer" class="audio-tracks" hidden>
+                <label class="meta-label">Faixa de áudio:</label>
+                <select data-field="audioTrackSelect" class="select-field"></select>
+                <label class="checkbox-inline">
+                  <input data-field="allAudio" type="checkbox" />
+                  <span>Baixar todas as faixas de áudio</span>
+                </label>
+              </div>
+              <div data-field="subtitleTracksContainer" class="subtitle-tracks" hidden>
+                <label class="meta-label">Legendas:</label>
+                <div data-field="subtitleCheckboxes" class="subtitle-checkboxes"></div>
+                <label class="checkbox-inline">
+                  <input data-field="embedSubs" type="checkbox" />
+                  <span>Embutir no vídeo</span>
+                </label>
+              </div>
+              <div data-field="noTracksMessage" class="hint-line" hidden>
+                Nenhuma faixa de áudio ou legenda adicional disponível para esta fonte.
+              </div>
+            </div>
+          </section>
+
           <section class="card progress-card">
             <div class="console-toolbar">
               <div>

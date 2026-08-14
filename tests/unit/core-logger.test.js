@@ -115,3 +115,41 @@ test('core-logger: error com objeto headers redigido', () => {
   assert.equal(obj.headers.Cookie, '***');
   assert.equal(obj.status, 403);
 });
+
+// Sprint 4.1: circular buffer for log export
+test('core-logger: getBuffer returns log entries', () => {
+  const { sink } = captureSink();
+  const logger = createLogger({ level: 'debug', sink, bufferSize: 100 });
+  logger.info('test message 1');
+  logger.warn('test message 2');
+
+  const buffer = logger.getBuffer();
+  assert.equal(buffer.length, 2);
+  assert.equal(buffer[0].level, 'info');
+  assert.ok(buffer[0].message.includes('test message 1'));
+  assert.equal(buffer[1].level, 'warn');
+  assert.ok(buffer[1].message.includes('test message 2'));
+  assert.ok(buffer[0].timestamp);
+});
+
+test('core-logger: buffer respects bufferSize limit', () => {
+  const { sink } = captureSink();
+  const logger = createLogger({ level: 'debug', sink, bufferSize: 3 });
+  logger.info('msg 1');
+  logger.info('msg 2');
+  logger.info('msg 3');
+  logger.info('msg 4');
+
+  const buffer = logger.getBuffer();
+  assert.equal(buffer.length, 3);
+  assert.ok(buffer[0].message.includes('msg 2'), 'oldest entry shifted out');
+});
+
+test('core-logger: clearBuffer empties the buffer', () => {
+  const { sink } = captureSink();
+  const logger = createLogger({ level: 'debug', sink });
+  logger.info('something');
+  assert.equal(logger.getBuffer().length, 1);
+  logger.clearBuffer();
+  assert.equal(logger.getBuffer().length, 0);
+});

@@ -220,7 +220,8 @@ test('core-models createDownloadJob: estado inicial queued e shape', () => {
   assert.equal(job.url, 'https://example.com/v.mp4');
   assert.equal(job.title, '');
   assert.equal(job.error, null);
-  assert.equal(job.id, 'job-1');
+  assert.match(job.id, /^job-/, 'ID comeca com job-');
+  assert.ok(job.id.length > 5, 'ID tem comprimento razoavel (timestamp+random)');
   assert.equal(job.createdAt, job.updatedAt);
   assert.equal(job.history.length, 1);
   assert.deepEqual(job.history[0], { from: null, to: 'queued', at: job.createdAt });

@@ -27,16 +27,53 @@ export function loadConfig(projectRoot, io) {
 }
 
 /**
- * P7 — Funde o config.json legado com os settings persistidos (settings.js).
+ * P4.3 — Auto-migrate legacy config.json to streamgrab.settings.json.
+ * Renames config.json to config.json.deprecated (never deletes).
+ */
+function migrateLegacyConfig(projectRoot, settings, io) {
+  const configPath = path.join(projectRoot, 'config.json');
+  const deprecatedPath = path.join(projectRoot, 'config.json.deprecated');
+  try {
+    if (!fs.existsSync(configPath)) return;
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+    // Merge known fields into the P7 settings store (settings wins on conflict)
+    if (raw.headers && typeof raw.headers === 'object') {
+      // headers are CLI-only, not stored in settings — skip
+    }
+    if (typeof raw.turbo === 'boolean' && !settings.all().turbo) {
+      settings.set('turbo', raw.turbo);
+    }
+    if (Number(raw.turboChunks) > 0 && !settings.all().turboChunks) {
+      settings.set('turboChunks', Number(raw.turboChunks));
+    }
+    if (raw.smartTurbo !== undefined && !settings.all().smartTurbo) {
+      settings.set('smartTurbo', raw.smartTurbo);
+    }
+
+    // Rename to .deprecated (never delete — user may want to inspect)
+    fs.renameSync(configPath, deprecatedPath);
+    io.log('[config] config.json migrado para streamgrab.settings.json (renomeado para config.json.deprecated)');
+  } catch {
+    /* migration is best-effort — never breaks the app */
+  }
+}
+
+/**
+ * P7 — Merges legacy config.json with persisted settings (settings.js).
  *
- * Regra: settings P7 vencem sobre o config.json legado (config.json e
- * tratado como default antigo). `io` opcional para avisos; `settingsFile`
- * opcional (testes). Retorna o objeto loadConfig + `settings` (store P7).
+ * Rule: P7 settings override legacy config.json (config.json is treated
+ * as an old default). `io` optional for warnings; `settingsFile` optional
+ * (tests). Returns the loadConfig object + `settings` (P7 store).
  */
 export function mergeConfigWithSettings({ projectRoot, io = { log() {} }, settingsFile }) {
   const legacy = loadConfig(projectRoot, io);
   const file = settingsFile || path.join(projectRoot, 'streamgrab.settings.json');
   const settings = createSettingsStore({ file });
+
+  // Sprint 4.3: auto-migrate legacy config.json on first detection
+  migrateLegacyConfig(projectRoot, settings, io);
+
   const merged = { ...legacy };
 
   const st = normalizeSettings(settings.all());

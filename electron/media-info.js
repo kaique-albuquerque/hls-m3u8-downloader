@@ -168,6 +168,9 @@ export function normalizeMediaInfo(raw = {}, { url = '', baseUrl = '', sourceTyp
     bitrateLabel: best?.bitrateLabel || '',
     estimatedSize: best?.estimatedSize || 0,
     estimatedSizeLabel: best?.estimatedSizeLabel || '',
+    // P12.1: audio tracks + subtitles (pass through from adapter)
+    audioTracks: Array.isArray(raw?.audioTracks) ? raw.audioTracks : [],
+    subtitleTracks: Array.isArray(raw?.subtitleTracks) ? raw.subtitleTracks : [],
   };
 }
 

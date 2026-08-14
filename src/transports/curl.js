@@ -13,7 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { createCurlClient, findCurlImpersonate, killAllCurl } from '../curlimp.js';
+import { createCurlClient, findCurlImpersonate, killAllCurl as killAllCurlGlobal } from '../curlimp.js';
 import { parseSegmentPlaylist } from '../hls.js';
 
 const SAFE_SEGMENT_EXT = new Set(['ts', 'mp4', 'm4s', 'm2ts', 'mts', 'aac', 'mp3', 'mov', 'm4a', '3gp', 'mj2', 'vob', 'wav']);
@@ -76,7 +76,9 @@ export class CurlImpersonateTransport {
     this.name = name || path.basename(cmd);
     this.profile = profile;
     this.headers = headers;
-    this._client = createCurlClient({ cmd, headers, profile });
+    // P1.1: tracking per-instance — kill() so mata processos deste transport.
+    this._activeProcesses = new Set();
+    this._client = createCurlClient({ cmd, headers, profile, registerActive: this._activeProcesses });
     this._active = true;
   }
 
@@ -87,18 +89,29 @@ export class CurlImpersonateTransport {
     return new CurlImpersonateTransport({ ...found, headers });
   }
 
+  /** Mata TODOS os processos curl-impersonate ativos (shutdown global). */
+  static killAll() {
+    killAllCurlGlobal();
+  }
+
   get client() {
     return this._client;
   }
 
-  /** Mata os processos curl ativos deste transporte (cancelamento/cleanup). */
+  /** Mata os processos curl ativos DESTE transporte (cancelamento/cleanup). */
   kill() {
-    killAllCurl();
+    for (const child of this._activeProcesses) {
+      try {
+        child.kill();
+      } catch {
+        /* ignora */
+      }
+    }
   }
 
   dispose() {
     this._active = false;
-    killAllCurl();
+    this.kill();
   }
 
   /**
@@ -106,7 +119,7 @@ export class CurlImpersonateTransport {
    * @returns {Promise<{ok: boolean, code: number, httpCode: string, finalUrl: string, stderr: string}>}
    */
   async fetch(url, output, { signal, timeoutMs = 90000 } = {}) {
-    const stop = () => killAllCurl();
+    const stop = () => this.kill();
     if (signal) {
       if (signal.aborted) return { ok: false, code: -1, httpCode: '', finalUrl: '', stderr: 'cancelado' };
       signal.addEventListener('abort', stop, { once: true });
@@ -125,7 +138,7 @@ export class CurlImpersonateTransport {
    * @returns {Promise<{text: string, finalUrl: string}>}
    */
   async getText(url, { signal, timeoutMs = 90000 } = {}) {
-    const stop = () => killAllCurl();
+    const stop = () => this.kill();
     if (signal) {
       if (signal.aborted) throw abortError();
       signal.addEventListener('abort', stop, { once: true });

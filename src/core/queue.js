@@ -45,6 +45,7 @@ export function createDownloadQueue({ engine, maxConcurrent = 3, storage = null,
   const _running = new Map(); // id -> Promise<job>
   const _order = []; // ids em ordem de fila
   let _draining = false;
+  let _pumpScheduled = false;
   let _paused = false;
 
   const emit = (event, payload) => {
@@ -87,33 +88,43 @@ export function createDownloadQueue({ engine, maxConcurrent = 3, storage = null,
 
   /** Inicia o proximo job `queued` na ordem, respeitando o limite. */
   async function _pump() {
-    if (_draining) return;
-    _draining = true;
-    try {
-      while (!_paused && _running.size < maxConcurrent) {
-        const job = orderedJobs().find((j) => j.state === 'queued' && !_started.has(j.id));
-        if (!job) break;
-        _started.add(job.id);
-        // P11: propaga as opcoes por-job guardadas em meta (pasta de saida,
-        // formato escolhido, headers/auth) para o engine — a UI nao depende
-        // mais da simulacao de prompts do CLI para definir o destino.
-        const runOpts = {
-          destination: job.meta?.destination || undefined,
-          selectedUrl: job.meta?.selectedUrl || undefined,
-          headers: job.meta?.headers || undefined,
-          auth: job.meta?.auth || undefined,
-          mode: job.meta?.mode || undefined,
-        };
-        const p = engine
-          .run(job.id, runOpts)
-          .catch(() => {}) // estado terminal ja registrado via eventos
-          .finally(() => _running.delete(job.id));
-        _running.set(job.id, p);
-        emit('started', job);
+    // P1.4: usa queueMicrotask para evitar race condition — chamadas
+    // concurrentes sao coalescidas em um unico pump na proxima microtask.
+    if (_pumpScheduled) return;
+    _pumpScheduled = true;
+    queueMicrotask(async () => {
+      _pumpScheduled = false;
+      if (_draining) return;
+      _draining = true;
+      try {
+        while (!_paused && _running.size < maxConcurrent) {
+          const job = orderedJobs().find((j) => j.state === 'queued' && !_started.has(j.id));
+          if (!job) break;
+          _started.add(job.id);
+          // P11: propaga as opcoes por-job guardadas em meta (pasta de saida,
+          // formato escolhido, headers/auth) para o engine — a UI nao depende
+          // mais da simulacao de prompts do CLI para definir o destino.
+          const runOpts = {
+            destination: job.meta?.destination || undefined,
+            selectedUrl: job.meta?.selectedUrl || undefined,
+            headers: job.meta?.headers || undefined,
+            auth: job.meta?.auth || undefined,
+            mode: job.meta?.mode || undefined,
+            // P12.1: audio/subtitle selections from meta
+            audioLanguage: job.meta?.audioLanguage || undefined,
+            allAudio: job.meta?.allAudio || false,
+          };
+          const p = engine
+            .run(job.id, runOpts)
+            .catch(() => {}) // estado terminal ja registrado via eventos
+            .finally(() => _running.delete(job.id));
+          _running.set(job.id, p);
+          emit('started', job);
+        }
+      } finally {
+        _draining = false;
       }
-    } finally {
-      _draining = false;
-    }
+    });
   }
 
   return {

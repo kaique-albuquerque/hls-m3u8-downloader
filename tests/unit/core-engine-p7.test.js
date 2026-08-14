@@ -91,16 +91,16 @@ test('engine usa settings.defaultDir, checa disco, registra historico e finaliza
   });
 
   const done = new Promise((resolve) => engine.on('complete', resolve));
-  engine.enqueue('https://cdn.example/v.mp4', { title: 'Video P7' });
-  engine.run('job-1', {});
+  const enqueued = engine.enqueue('https://cdn.example/v.mp4', { title: 'Video P7' });
+  engine.run(enqueued.id, {});
   const complete = await done;
 
-  assert.equal(complete.jobId, 'job-1');
+  assert.equal(complete.jobId, enqueued.id);
   assert.equal(diskCalls.length, 1, 'checagem de disco executada uma vez');
   assert.equal(diskCalls[0].dir, downloadDir, 'usou defaultDir dos settings');
   assert.equal(diskCalls[0].requiredBytes, 1000);
 
-  const job = engine.getJob('job-1');
+  const job = engine.getJob(enqueued.id);
   assert.equal(job.state, 'completed');
   // analyze() sobrescreve o titulo com 'Titulo P7'
   assert.equal(job.meta.output, path.join(downloadDir, 'Titulo P7.mp4'));
@@ -152,13 +152,13 @@ test('cancel com atomic remove o .part (nenhum arquivo final)', async () => {
   });
 
   const cancelled = new Promise((resolve) => engine.on('cancel', resolve));
-  engine.enqueue('https://cdn.example/v.mp4', { title: 'Cancelar' });
-  engine.run('job-1', {});
-  await waitFor(() => engine.getJob('job-1').state === 'downloading');
-  engine.cancel('job-1');
+  const enqueued = engine.enqueue('https://cdn.example/v.mp4', { title: 'Cancelar' });
+  engine.run(enqueued.id, {});
+  await waitFor(() => engine.getJob(enqueued.id).state === 'downloading');
+  engine.cancel(enqueued.id);
   await cancelled;
 
-  const job = engine.getJob('job-1');
+  const job = engine.getJob(enqueued.id);
   assert.equal(job.state, 'cancelled');
   assert.equal(fs.existsSync(job.meta.output), false, 'final nao existe');
   assert.equal(fs.existsSync(`${job.meta.output}.part`), false, '.part removido');
@@ -181,14 +181,14 @@ test('remove(id) de job terminal funciona; de job ativo lanca JOB_ACTIVE', async
     resolveAdapter: fakeResolver(),
     executor,
   });
-  engine.enqueue('https://cdn.example/v.mp4');
-  const running = engine.run('job-1', {});
-  await waitFor(() => engine.getJob('job-1').state === 'downloading');
-  assert.throws(() => engine.remove('job-1'), (err) => err.code === 'JOB_ACTIVE');
-  engine.cancel('job-1');
+  const enqueued = engine.enqueue('https://cdn.example/v.mp4');
+  const running = engine.run(enqueued.id, {});
+  await waitFor(() => engine.getJob(enqueued.id).state === 'downloading');
+  assert.throws(() => engine.remove(enqueued.id), (err) => err.code === 'JOB_ACTIVE');
+  engine.cancel(enqueued.id);
   await running;
-  assert.equal(engine.remove('job-1'), true);
-  assert.equal(engine.getJob('job-1'), null);
+  assert.equal(engine.remove(enqueued.id), true);
+  assert.equal(engine.getJob(enqueued.id), null);
 });
 
 test('enqueue aceita id explicito (restauracao de fila)', () => {
