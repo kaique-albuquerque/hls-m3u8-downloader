@@ -49,6 +49,7 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
     const flags = parseDownloadFlags(rest);
+    // Garantir que usa o novo método com fallbacks
     const result = await runDownloadCommand({ url, projectRoot: PROJECT_ROOT, io: console, options: flags });
     return result?.code ?? 1;
   }
@@ -79,6 +80,39 @@ if (isEntry) {
       console.error('\n[ERRO inesperado]', err && err.stack ? err.stack : err);
       process.exit(1);
     });
+}
+
+/**
+ * Função para detectar se o vídeo é protegido por DRM
+ */
+export async function detectDRM(url) {
+  try {
+    const drmDownloader = new DRMDownloader();
+    return await drmDownloader.detectDRM(url);
+  } catch (error) {
+    console.warn('Falha ao detectar DRM:', error.message);
+    return { type: null };
+  }
+}
+
+/**
+ * Função para download de vídeo com fallback
+ */
+export async function downloadVideo(url, options) {
+  try {
+    const drmInfo = await detectDRM(url);
+    
+    if (drmInfo.type) {
+      const drmDownloader = new DRMDownloader(options);
+      return await drmDownloader.download(url, options);
+    }
+    
+    // Se não for DRM, usa download normal
+    return await runDownloadCommand({ url, projectRoot: PROJECT_ROOT, io: console, options });
+  } catch (error) {
+    console.error('Erro no download:', error);
+    throw error;
+  }
 }
 
 export default main;

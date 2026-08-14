@@ -184,6 +184,7 @@ export async function runAnalyzeCommand({ url, projectRoot, io = console, flags 
  * Delega ao runCliSession (mesmo fluxo do Electron) com respostas
  * pré-preenchidas; `--audio-only` usa um fluxo dedicado (extração de áudio).
  */
+
 export async function runDownloadCommand({ url, projectRoot, io = console, options = {} }) {
   const target = normalizeUrl(url);
   if (!target || !isValidHttpUrl(target)) {

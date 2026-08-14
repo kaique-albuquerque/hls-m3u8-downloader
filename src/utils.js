@@ -30,6 +30,7 @@ export function detectSourceType(value) {
     if (pathname.includes('.m3u8')) return 'hls';
     if (pathname.includes('.mpd')) return 'dash';
     if (host.includes('googlevideo.com') && pathname.includes('/videoplayback')) return 'direct';
+    if (host.includes('play.mlstatic.com')) return 'mercadoplay'; // Mercado Play (mdstrm)
     if (isSocialMediaUrl(value)) return 'social';
     const ext = pathname.match(/\.([a-z0-9]{1,5})$/i)?.[1] || '';
     if (DIRECT_MEDIA_EXTENSIONS.has(ext)) return 'direct';

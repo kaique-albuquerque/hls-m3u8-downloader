@@ -70,6 +70,7 @@ export function describeSourceType(sourceType) {
   if (sourceType === 'direct') return 'midia direta';
   if (sourceType === 'youtube') return 'YouTube';
   if (sourceType === 'social') return 'rede social';
+  if (sourceType === 'mercadoplay') return 'Mercado Play (mdstrm)';
   return 'desconhecido';
 }
 

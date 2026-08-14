@@ -18,6 +18,7 @@ import { ytdlpProvider } from './ytdlp/index.js';
 import { hlsProvider } from './hls/index.js';
 import { dashProvider } from './dash/index.js';
 import { directProvider } from './direct/index.js';
+import { mercadoPlayProvider } from './mercadoplay/index.js';
 
 export class ProviderRegistry {
   constructor() {
@@ -90,6 +91,7 @@ export class ProviderRegistry {
 export function createDefaultProviderRegistry() {
   return new ProviderRegistry()
     .register(ytdlpProvider)
+    .register(mercadoPlayProvider)
     .register(hlsProvider)
     .register(dashProvider)
     .register(directProvider);
