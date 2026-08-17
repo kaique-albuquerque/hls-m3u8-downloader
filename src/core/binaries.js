@@ -47,6 +47,40 @@ export function hasPackagedBinary(name, { fsImpl = fs } = {}) {
   return Boolean(p) && fsImpl.existsSync(p);
 }
 
+/**
+ * Caminho do mp4decrypt (Bento4): empacotado (extraResources/bin) >
+ * vendor/mp4decrypt/ > PATH.
+ *
+ * mp4decrypt é usado para descriptografar conteúdo CENC (Widevine/PlayReady)
+ * após a aquisição de chaves via CDM/pywidevine (plano DRM, fase 1).
+ */
+export function getMp4decryptCommand() {
+  const packaged = packagedBinaryPath(binName('mp4decrypt'));
+  if (packaged && fs.existsSync(packaged)) return packaged;
+  const local = path.join(PROJECT_ROOT, 'vendor', 'mp4decrypt', binName('mp4decrypt'));
+  if (fs.existsSync(local)) return local;
+  return 'mp4decrypt';
+}
+
+/** true se o mp4decrypt está disponível (vendor ou PATH). */
+export function hasMp4decrypt() {
+  return fs.existsSync(path.join(PROJECT_ROOT, 'vendor', 'mp4decrypt', binName('mp4decrypt')));
+}
+
+/**
+ * Caminho da Widevine CDM (widevinecdm.dll): empacotado (extraResources/bin) >
+ * vendor/widevine-cdm/.
+ *
+ * O CDM é necessário para gerar o device (pywidevine) que assina o challenge
+ * de licença Widevine (plano DRM, fase 1). Retorna '' se ausente.
+ */
+export function getWidevineCdmPath() {
+  const packaged = packagedBinaryPath(binName('widevinecdm'));
+  if (packaged && fs.existsSync(packaged)) return packaged;
+  const local = path.join(PROJECT_ROOT, 'vendor', 'widevine-cdm', binName('widevinecdm'));
+  return fs.existsSync(local) ? local : '';
+}
+
 let cachedYtDlp = null;
 
 /**

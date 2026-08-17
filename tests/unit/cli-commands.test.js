@@ -379,6 +379,60 @@ test('P9 parseCliCommand: detecta subcomandos sem quebrar o legado', async () =>
   assert.equal(parseCliCommand([YOUTUBE_URL]).command, 'interactive');
 });
 
+test('P1-DRM parseCliCommand: detecta subcomando drm', async () => {
+  const { parseCliCommand } = await import(`../../src/cli/commands.js?p9-drm-parse=${Date.now()}`);
+
+  assert.deepEqual(parseCliCommand(['drm', 'analyze', 'https://x.m3u8', '--json']), {
+    command: 'drm',
+    url: 'https://x.m3u8',
+    rest: ['--json'],
+    drmSub: 'analyze',
+  });
+  assert.deepEqual(parseCliCommand(['drm', 'download', 'https://x.m3u8', '--license-url', 'https://lic']), {
+    command: 'drm',
+    url: 'https://x.m3u8',
+    rest: ['--license-url', 'https://lic'],
+    drmSub: 'download',
+  });
+  // drm sem subcomando
+  assert.equal(parseCliCommand(['drm']).command, 'drm');
+  assert.equal(parseCliCommand(['drm']).drmSub, '');
+});
+
+test('P1-DRM parseDrmFlags: mapeia opções do drm', async () => {
+  const { parseDrmFlags } = await import(`../../src/cli/commands.js?p9-drm-flags=${Date.now()}`);
+  const flags = parseDrmFlags([
+    '--json',
+    '--output', 'D:/out',
+    '--filename', 'filme',
+    '--license-url', 'https://license.example/widevine',
+    '--raw-body',
+    '--referer', 'https://play.mercadolibre.com.br/',
+  ]);
+
+  assert.equal(flags.json, true);
+  assert.equal(flags.outputDir, 'D:/out');
+  assert.equal(flags.filename, 'filme');
+  assert.equal(flags.licenseUrl, 'https://license.example/widevine');
+  assert.equal(flags.rawBody, true);
+  assert.equal(flags.headers.Referer, 'https://play.mercadolibre.com.br/');
+});
+
+test('P1-DRM parseKeysFlag: converte kid:key list em objetos', async () => {
+  const { parseKeysFlag } = await import(`../../src/cli/commands.js?p9-keys=${Date.now()}`);
+  const keys = parseKeysFlag('01234567-89ab-cdef-0123-456789abcdef:aa11bb22cc33dd44ee55ff6677889900,feedface:00112233445566778899aabbccddeeff');
+
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0].kid, '0123456789abcdef0123456789abcdef'); // traços removidos
+  assert.equal(keys[0].key, 'aa11bb22cc33dd44ee55ff6677889900');
+  assert.equal(keys[1].kid, 'feedface');
+  assert.equal(keys[1].key, '00112233445566778899aabbccddeeff');
+
+  // entrada vazia/malformada
+  assert.deepEqual(parseKeysFlag(''), []);
+  assert.deepEqual(parseKeysFlag('kid:key,,outro'), [{ kid: 'kid', key: 'key' }]);
+});
+
 test('P9 parseDownloadFlags: mapeia opções escalares e booleanas', async () => {
   const { parseDownloadFlags } = await import(`../../src/cli/commands.js?p9-pdf=${Date.now()}`);
   const flags = parseDownloadFlags([

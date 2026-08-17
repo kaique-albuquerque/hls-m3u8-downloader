@@ -29,11 +29,15 @@ import { runDownloadFlow } from './download.js';
 import { createContext } from './context.js';
 import { renderAnalysis, printAnalysisError } from './render.js';
 
-/** Detecta o subcomando: analyze | download | help | interactive (padrão). */
+/** Detecta o subcomando: analyze | download | drm | help | interactive (padrão). */
 export function parseCliCommand(argv = []) {
   const first = argv[0];
   if (first === 'analyze' || first === 'download') {
     return { command: first, url: argv[1] || '', rest: argv.slice(2) };
+  }
+  if (first === 'drm') {
+    const sub = argv[1] || '';
+    return { command: 'drm', url: argv[2] || '', rest: argv.slice(3), drmSub: sub };
   }
   // `help` literal abre a ajuda dos subcomandos; `--help`/`-h` continuam caindo
   // no fluxo interativo (printUsage atual) para preservar compatibilidade.
@@ -52,6 +56,8 @@ export function printSubcommandHelp(io) {
   io.log('  streamgrab <url>                    Fluxo interativo (padrao)');
   io.log('  streamgrab analyze <url> [--json]   Analisa a URL sem interacao');
   io.log('  streamgrab download <url> [opcoes]  Baixa a URL sem interacao');
+  io.log('  streamgrab drm analyze <url>        Detecta DRM de uma URL');
+  io.log('  streamgrab drm download <url>       Pipeline DRM completo (licenca + decrypt)');
   io.log('');
   io.log('Opcoes do analyze:');
   io.log('  --json                       Saida em JSON (machine-readable)');
@@ -77,6 +83,15 @@ export function printSubcommandHelp(io) {
   io.log('  --curl-impersonate           Forca o modo curl-impersonate para HLS');
   io.log('  --referer <url>              Header Referer');
   io.log('  --user-agent <ua>            Header User-Agent');
+  io.log('');
+  io.log('Comandos DRM (experimental, fase 1-2 do plano):');
+  io.log('  streamgrab drm analyze <url> [--json]');
+  io.log('  streamgrab drm download <url> [--output <dir>] [--license-url <url>] [--keys <k1:k1>]');
+  io.log('      --license-url <url>      License server (Widevine) — descoberto na Fase 0');
+  io.log('      --keys <kid:key,...>     Chaves KID:KEY já conhecidas (ex.: WidevineProxy2).');
+  io.log('                                Pula a licença — não precisa de CDM/device.');
+  io.log('      --raw-body               Envia o challenge como body bruto (octet-stream)');
+  io.log('      --no-download            Não baixa o stream (usa arquivo .encrypted.mp4 existente)');
   io.log('');
 }
 
@@ -368,4 +383,161 @@ export function ensureExt(name, ext) {
   if (!safe) return name;
   const re = new RegExp(`\\.${safe}$`, 'i');
   return re.test(name) ? name : `${name}.${safe}`;
+}
+
+// ---------------------------------------------------------------------------
+// Comandos DRM (fase 1-2 do plano de bypass — experimental)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parseia flags do `streamgrab drm ...`:
+ *   --json | --output <dir> | --filename <nome> | --license-url <url>
+ *   --raw-body | --keys <kid:key,...> | --no-download
+ *   --cookies <file> | --cookies-from-browser <b> |
+ *   --referer <url> | --user-agent <ua> | --license <url> (alias)
+ */
+export function parseDrmFlags(rest = []) {
+  const flags = {
+    json: false,
+    outputDir: '',
+    filename: '',
+    licenseUrl: '',
+    rawBody: false,
+    keys: [],
+    download: true,
+    headers: {},
+  };
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    if (arg === '--json') flags.json = true;
+    else if (arg === '--output' || arg === '-o') flags.outputDir = rest[++i] || '';
+    else if (arg === '--filename') flags.filename = rest[++i] || '';
+    else if (arg === '--license-url' || arg === '--license') flags.licenseUrl = rest[++i] || '';
+    else if (arg === '--raw-body') flags.rawBody = true;
+    else if (arg === '--no-download') flags.download = false;
+    else if (arg === '--keys') flags.keys = parseKeysFlag(rest[++i] || '');
+    else if (arg === '--cookies') flags.cookiesFile = rest[++i] || '';
+    else if (arg === '--cookies-from-browser') flags.cookiesFromBrowser = rest[++i] || '';
+  }
+  flags.headers = parseCliHeaders(rest);
+  return flags;
+}
+
+/**
+ * Converte "kid1:key1,kid2:key2" em [{ kid, key }].
+ * Aceita também formato com traços no KID (remove traços).
+ */
+export function parseKeysFlag(value) {
+  return String(value || '')
+    .split(',')
+    .map((pair) => pair.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const [kid = '', key = ''] = pair.split(':');
+      return { kid: String(kid).replace(/-/g, '').toLowerCase(), key: String(key).trim() };
+    })
+    .filter((k) => k.kid && k.key);
+}
+
+/**
+ * `streamgrab drm analyze <url>` — detecta DRM (Widevine/PlayReady/ClearKey)
+ * no manifesto da URL. Retorna { code, ok, drm? }.
+ */
+export async function runDrmAnalyzeCommand({ url, io = console, flags = {} }) {
+  const target = normalizeUrl(url);
+  if (!isValidHttpUrl(target)) {
+    io.log('URL inválida. Use: streamgrab drm analyze <url>');
+    return { code: 1, ok: false, error: 'invalid-url' };
+  }
+
+  const { resolveDRMHandlerForUrl } = await import('../drm/registry.js');
+  const handler = resolveDRMHandlerForUrl(target, { verbose: true, onLog: (m) => io.log(m) });
+
+  try {
+    const result = await handler.detectDRMFromUrl(target, flags.headers || {});
+    const drm = result || { hasDRM: false, type: null, pssh: null, kid: null };
+    if (flags.json) {
+      io.log(JSON.stringify({ url: target, drm }, null, 2));
+    } else {
+      io.log('\nDetecção de DRM:');
+      io.log(`  URL: ${target}`);
+      io.log(`  DRM: ${drm.hasDRM ? drm.type || 'desconhecido' : 'nenhum'}`);
+      if (drm.hasDRM) {
+        if (drm.pssh) io.log(`  PSSH: ${drm.pssh}`);
+        if (drm.kid) io.log(`  KID: ${drm.kid}`);
+        if (drm.type === 'widevine') {
+          io.log('  Próximo passo: streamgrab drm download <url> --license-url <license_server>');
+        }
+      } else {
+        io.log('  Conteúdo sem proteção — download normal funciona.');
+      }
+    }
+    return { code: 0, ok: true, drm };
+  } catch (err) {
+    io.log(`Falha ao detectar DRM: ${err?.message || err}`);
+    return { code: 1, ok: false, error: err?.code || 'DRM_DETECT_FAILED' };
+  }
+}
+
+/**
+ * `streamgrab drm download <url>` — pipeline DRM completo:
+ * baixa o arquivo criptografado (FFmpeg) e descriptografa (mp4decrypt).
+ *
+ * Com `--keys <kid:key,...>` pula a aquisição de licença — ideal quando as
+ * chaves foram capturadas com extensão de navegador (WidevineProxy2/wvg).
+ */
+export async function runDrmDownloadCommand({ url, projectRoot: _projectRoot, io = console, flags = {} }) {
+  const target = normalizeUrl(url);
+  if (!isValidHttpUrl(target)) {
+    io.log('URL inválida. Use: streamgrab drm download <url>');
+    return { code: 1, ok: false, error: 'invalid-url' };
+  }
+
+  const { runDRMPipeline } = await import('../drm/registry.js');
+
+  const outDir = flags.outputDir || getDefaultDownloadsDir();
+  const filename = flags.filename || sanitizeFilename(new URL(target).hostname) || 'drm-output';
+  const outputFile = path.join(outDir, ensureMp4(filename));
+
+  io.log(`\n[drm] Pipeline Widevine — Mercado Play`);
+  io.log(`[drm] URL: ${target}`);
+  io.log(`[drm] Saída: ${outputFile}`);
+  if (flags.keys?.length) {
+    io.log(`[drm] ${flags.keys.length} chave(s) fornecida(s) manualmente`);
+  }
+
+  try {
+    const result = await runDRMPipeline({
+      url: target,
+      outputFile,
+      headers: flags.headers || {},
+      licenseUrl: flags.licenseUrl || '',
+      keys: flags.keys || [],
+      download: flags.download !== false,
+      service: 'mercadoplay',
+      onLog: (m) => io.log(m),
+    });
+
+    if (flags.json) {
+      io.log(JSON.stringify({ ok: true, ...result }, null, 2));
+    } else if (result.decrypted) {
+      io.log(`\n[drm] ✓ Descriptografado: ${result.output}`);
+      io.log(`[drm]   Chaves: ${result.keys?.length || 0} obtida(s)`);
+    } else {
+      io.log(`\n[drm] Sem DRM detectado — arquivo salvo em ${result.output}`);
+    }
+    return { code: 0, ok: true, ...result };
+  } catch (err) {
+    io.log(`\n[drm] ✗ Falha: ${err?.message || err}`);
+    if (err?.code === 'DRM_INFRA_ERROR') {
+      io.log('[drm] Instale a infraestrutura:');
+      io.log('  npm run mp4decrypt:install   (Bento4)');
+      io.log('  npm run cdm:extract          (Widevine CDM do Chrome/Edge)');
+      io.log('  pip install pywidevine       (licença)');
+      io.log('');
+      io.log('[drm] OU capture as chaves com uma extensão de navegador');
+      io.log('[drm] (WidevineProxy2 / wvg) e use: --keys <kid:key,kid:key>');
+    }
+    return { code: 1, ok: false, error: err?.code || 'DRM_DOWNLOAD_FAILED' };
+  }
 }

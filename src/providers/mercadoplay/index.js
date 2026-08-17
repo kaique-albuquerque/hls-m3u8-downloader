@@ -21,6 +21,7 @@ import { fetchPlaylistText } from '../../hls.js';
 import { hlsProvider } from '../hls/index.js';
 import { dashProvider } from '../dash/index.js';
 import { normalizeHeaders, DEFAULT_USER_AGENT } from '../../utils.js';
+import { detectWidevine } from '../../drm/widevine.js';
 
 const PLAYLIST_VARIATIONS = [
   'index.m3u8',
@@ -31,7 +32,7 @@ const PLAYLIST_VARIATIONS = [
 
 /** Detecta URLs de Mercado Play (play.mlstatic.com). */
 function isMercadoPlayUrl(url) {
-  return /(?:^|\.)play\.mlstatic\.com\//i.test(String(url || ''));
+  return /(?:^|[/.:])play\.mlstatic\.com\//i.test(String(url || ''));
 }
 
 /** Tenta encontrar a playlist correta testando múltiplas variações. */
@@ -109,6 +110,69 @@ function convertToPlaylistUrl(url) {
   return s;
 }
 
+/**
+ * Anexa detecção de DRM ao resultado do analyze (HLS/DASH).
+ * O provider atual lança UnsupportedDrmError para Widevine/PlayReady; aqui
+ * capturamos e devolvemos as informações de DRM em `media.drm` para que o
+ * pipeline de bypass (src/drm/) possa atuar.
+ */
+async function withDrmInfo(media, playlistUrl, headers, logFn = () => {}) {
+  let drm = null;
+  try {
+    const { text } = await fetchPlaylistText(playlistUrl, headers);
+    const detected = detectWidevine(text);
+    if (detected?.hasDrm) {
+      drm = {
+        type: detected.method === 'clearkey' ? 'clearkey' : 'widevine',
+        hasDRM: true,
+        pssh: detected.pssh,
+        kid: detected.kid,
+      };
+    }
+  } catch {
+    // Sem DRM ou manifesto inacessível — segue sem info de DRM.
+  }
+  return drm ? { ...media, drm } : media;
+}
+
+/**
+ * Converte um UnsupportedDrmError (lançado pelo provider HLS/DASH) em um
+ * MediaInfo com `drm` anotado — o conteúdo protegido passa a ser analisável
+ * pelo pipeline de bypass. Retorna null para erros que não são de DRM.
+ */
+async function handleDrmAnalyzeError(err, playlistUrl, headers, logFn = () => {}) {
+  if (err?.code !== 'UNSUPPORTED_DRM_ERROR') return null;
+  logFn?.('[mercadoplay] DRM detectado pelo provider — coletando info para bypass');
+  try {
+    const { text } = await fetchPlaylistText(playlistUrl, headers);
+    const detected = detectWidevine(text);
+    return {
+      kind: 'drm',
+      sourceType: playlistUrl.endsWith('.mpd') ? 'dash' : 'hls',
+      provider: 'mercadoplay',
+      title: '',
+      variants: [],
+      drm: detected?.hasDrm
+        ? {
+            type: detected.method === 'clearkey' ? 'clearkey' : 'widevine',
+            hasDRM: true,
+            pssh: detected.pssh,
+            kid: detected.kid,
+          }
+        : { type: 'unknown', hasDRM: true, pssh: null, kid: null },
+    };
+  } catch {
+    return {
+      kind: 'drm',
+      sourceType: playlistUrl.endsWith('.mpd') ? 'dash' : 'hls',
+      provider: 'mercadoplay',
+      title: '',
+      variants: [],
+      drm: { type: 'unknown', hasDRM: true, pssh: null, kid: null },
+    };
+  }
+}
+
 export const mercadoPlayProvider = {
   id: 'mercadoplay',
   label: 'Mercado Play (bypass mdstrm)',
@@ -123,6 +187,8 @@ export const mercadoPlayProvider = {
   /**
    * Analisa como HLS (após tentar encontrar a playlist correta).
    * Se a conversão resultar em .mpd, delega para DASH provider.
+   * Conteúdo protegido (Widevine/PlayReady) é sinalizado em `drm` em vez de
+   * lançar erro — o pipeline DRM (src/drm/) decide como prosseguir.
    */
   async analyze({ url, headers, onLog }) {
     const logFn = onLog || (() => {});
@@ -140,22 +206,45 @@ export const mercadoPlayProvider = {
     // Se converteu para DASH, delega
     if (playlistUrl.endsWith('.mpd')) {
       logFn?.('[mercadoplay] Delegando para DASH provider');
-      return dashProvider.analyze({ url: playlistUrl, headers });
+      try {
+        return withDrmInfo(
+          await dashProvider.analyze({ url: playlistUrl, headers }),
+          playlistUrl,
+          headers,
+          logFn
+        );
+      } catch (err) {
+        return handleDrmAnalyzeError(err, playlistUrl, headers, logFn);
+      }
     }
     
     // Senão, trata como HLS
     try {
       logFn?.(`[mercadoplay] Analisando como HLS: ${playlistUrl}`);
-      return await hlsProvider.analyze({ url: playlistUrl, headers });
+      return withDrmInfo(
+        await hlsProvider.analyze({ url: playlistUrl, headers }),
+        playlistUrl,
+        headers,
+        logFn
+      );
     } catch (err) {
+      const drmMedia = handleDrmAnalyzeError(err, playlistUrl, headers, logFn);
+      if (drmMedia) return drmMedia;
       logFn?.(`[mercadoplay] Erro HLS: ${err?.message}`);
       // Se HLS falhar, tenta DASH como fallback
       if (playlistUrl.includes('.m3u8')) {
         const dashUrl = playlistUrl.replace(/\.m3u8$/, '.mpd');
         try {
           logFn?.('[mercadoplay] Tentando DASH como fallback');
-          return await dashProvider.analyze({ url: dashUrl, headers });
-        } catch {
+          return withDrmInfo(
+            await dashProvider.analyze({ url: dashUrl, headers }),
+            dashUrl,
+            headers,
+            logFn
+          );
+        } catch (dashErr) {
+          const dashDrm = handleDrmAnalyzeError(dashErr, dashUrl, headers, logFn);
+          if (dashDrm) return dashDrm;
           // DASH também falhou, retorna erro original do HLS
           throw err;
         }

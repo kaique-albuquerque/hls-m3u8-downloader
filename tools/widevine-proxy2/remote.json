@@ -1,0 +1,8 @@
+{
+  "device_name": "getwvkeys",
+  "device_type": "ANDROID",
+  "host": "https://getwvkeys.cc/api/remotecdm/widevine",
+  "secret": "getwvkeys",
+  "security_level": 99,
+  "system_id": 9999
+}
