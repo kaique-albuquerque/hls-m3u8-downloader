@@ -9,9 +9,28 @@
  *   4. Parseia a licença e extrai as chaves KID:KEY
  *
  * Uso:
- *   node tools/getwvkeys-license.mjs "<URL_MPD>"
+ *   node tools/getwvkeys-license.mjs "<URL_MPD>" --dt-auth-token <JWT>
+ *                                                    [--referer <url>]
+ *                                                    [--cookie <valor>]
+ *
+ *   --dt-auth-token <JWT>  Header x-dt-auth-token (OBRIGATÓRIO p/ DRMtoday do Mercado Play).
+ *                          É um JWT que o player gera com userId, sessionId, merchant, etc.
+ *   --cookie <valor>       Cookies de sessão do Mercado Play (opcional, mas ajuda com MPD).
+ *   --referer <url>        Referer da requisição (padrão: play.mercadolivre.com.br/)
  *
  * Saída: imprime as chaves KID:KEY (uma por linha) e salva em chaves.txt
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * COMO CAPTURAR O x-dt-auth-token:
+ *
+ *  1. Abra o DevTools (F12) no Chrome → aba Network
+ *  2. DESATIVE a extensão WidevineProxy2 (para o player funcionar nativamente)
+ *  3. Filtre por "drmtoday" ou "license"
+ *  4. Reproduza o filme no Mercado Play
+ *  5. Clique na requisição POST para lic.drmtoday.com → Headers (Request)
+ *  6. Copie o valor de "x-dt-auth-token" (é um JWT longo)
+ *  7. Cole: --dt-auth-token "eyJhbGci..."
+ * ═══════════════════════════════════════════════════════════════════════════════
  */
 
 import fs from 'node:fs';
@@ -33,9 +52,35 @@ const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
 };
 
-const url = process.argv[2];
-if (!url?.startsWith('http')) {
-  console.error('Uso: node tools/getwvkeys-license.mjs "<URL_MPD>"');
+// ---------------------------------------------------------------------------
+// Parse de argumentos
+// ---------------------------------------------------------------------------
+const rawArgs = process.argv.slice(2);
+const url = rawArgs.find((a) => a.startsWith('http'));
+const flagIndex = (flag) => rawArgs.indexOf(flag);
+const flagValue = (flag) => { const i = flagIndex(flag); return i >= 0 && i + 1 < rawArgs.length ? rawArgs[i + 1] : null; };
+
+const dtAuthToken = flagValue('--dt-auth-token');
+const referer = flagValue('--referer');
+const cookie = flagValue('--cookie');
+
+if (!url) {
+  console.error('');
+  console.error('Uso: node tools/getwvkeys-license.mjs "<URL_MPD>" --dt-auth-token <JWT> [opcoes]');
+  console.error('');
+  console.error('  --dt-auth-token <JWT>  Header x-dt-auth-token (OBRIGATORIO p/ DRMtoday)');
+  console.error('  --referer <url>        Referer da requisicao (padrao: play.mercadolivre.com.br/)');
+  console.error('  --cookie <valor>       Header Cookie');
+  console.error('');
+  console.error('=== COMO CAPTURAR O x-dt-auth-token ===');
+  console.error('  1. Abra DevTools (F12) → aba Network');
+  console.error('  2. DESATIVE a extensao WidevineProxy2');
+  console.error('  3. Filtre por "drmtoday" ou "license"');
+  console.error('  4. Reproduza o filme no Mercado Play');
+  console.error('  5. Clique na requisicao POST para lic.drmtoday.com → Headers (Request)');
+  console.error('  6. Copie o valor de "x-dt-auth-token" (e um JWT longo)');
+  console.error('  7. Cole: --dt-auth-token "eyJhbGci..."');
+  console.error('========================================');
   process.exit(1);
 }
 
@@ -74,15 +119,32 @@ function remotePost(pathName, body) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Baixa o MPD e extrai o PSSH
+// 1. Baixa o MPD e extrai o PSSH (usa curl-impersonate para imitar Chrome)
 // ---------------------------------------------------------------------------
 console.log('[1/4] Baixando MPD e extraindo PSSH...');
-const mpdRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-if (!mpdRes.ok) {
-  console.error(`[erro] HTTP ${mpdRes.status} — link pode ter expirado. Pegue um novo.`);
+const curlMpdArgs = [
+  '--impersonate', 'chrome146',
+  '-s', '--compressed', '-m', '30',
+  url,
+  '-H', 'Accept: */*',
+  '-H', 'Accept-Language: pt-BR,pt;q=0.9,en;q=0.7',
+  '-H', 'Origin: https://play.mercadolivre.com.br',
+  '-H', 'Referer: https://play.mercadolivre.com.br/',
+  '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+];
+if (cookie) {
+  curlMpdArgs.push('-H', `Cookie: ${cookie}`);
+}
+const mpdRes = curl(curlMpdArgs);
+const mpdText = mpdRes.stdout;
+if (mpdRes.status !== 0 || !mpdText || mpdText.length < 100) {
+  console.error(`[erro] Falha ao baixar o MPD via curl-impersonate.`);
+  if (mpdText && mpdText.length < 500) {
+    console.error('  Resposta:', mpdText.slice(0, 300));
+  }
+  console.error('  O link do MPD pode ter EXPIRADO. Pegue um novo no DevTools.');
   process.exit(1);
 }
-const mpdText = await mpdRes.text();
 const psshTags = [...mpdText.matchAll(/<cenc:pssh[^>]*>([^<]+)<\/cenc:pssh>/gi)].map((m) => m[1].trim());
 const pssh = psshTags.find((p) => {
   try {
@@ -139,14 +201,29 @@ const challenge = Buffer.from(challengeB64, 'base64');
 // não suporta stdin fácil)
 const tmp = path.join(ROOT, 'tmp-challenge.bin');
 fs.writeFileSync(tmp, challenge);
+
+// Monta headers dinâmicos
+const licReferer = referer || HEADERS.Referer;
+const licHeaders = [
+  '-H', 'content-type: application/octet-stream',
+  '-H', `Origin: ${HEADERS.Origin}`,
+  '-H', `Referer: ${licReferer}`,
+  '-H', `User-Agent: ${HEADERS['User-Agent']}`,
+];
+if (dtAuthToken) {
+  licHeaders.push('-H', `x-dt-auth-token: ${dtAuthToken}`);
+  console.log('  ✓ x-dt-auth-token incluído');
+}
+if (cookie) {
+  licHeaders.push('-H', `Cookie: ${cookie}`);
+  console.log('  ✓ Cookie incluído');
+}
+
 const lic2 = curl([
   '-X', 'POST',
   LICENSE_URL,
   '--data-binary', `@${tmp}`,
-  '-H', 'content-type: application/octet-stream',
-  '-H', `Origin: ${HEADERS.Origin}`,
-  '-H', `Referer: ${HEADERS.Referer}`,
-  '-H', `User-Agent: ${HEADERS['User-Agent']}`,
+  ...licHeaders,
   '-w', '\n%{http_code}',
 ], { raw: true });
 fs.rmSync(tmp, { force: true });
@@ -162,7 +239,8 @@ if (httpCode !== 200 || !licenseData || licenseData.length < 50) {
   const head = licenseData.subarray(0, 80).toString('utf8').replace(/\s+/g, ' ').trim();
   if (/html|doctype/i.test(head)) {
     console.error('  O DRMtoday retornou uma página HTML — possível bloqueio/erro no license server.');
-    console.error('  Dica: pode ser que o vídeo exija um cabeçalho específico (token, dt-custom-data)');
+    console.error('  Dica: o DRMtoday exige o header x-dt-auth-token (JWT do player).');
+    console.error('  Rode: node tools/getwvkeys-license.mjs "<MPD>" --dt-auth-token "eyJhbGci..."');
   } else {
     console.error('  Resposta:', head.slice(0, 200));
   }
