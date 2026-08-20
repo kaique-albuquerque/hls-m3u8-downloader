@@ -1,14 +1,3 @@
-/**
- * P9 — Comandos da CLI evoluída (seção 44 do architect.md).
- *
- * Sintaxe aditiva (nada do legado muda):
- *   streamgrab <url>                     fluxo interativo atual (compatibilidade)
- *   streamgrab analyze <url> [--json]    análise não-interativa (stdin não usado)
- *   streamgrab download <url> [opções]   download não-interativo (stdin não usado)
- *
- * Exit codes: 0 = ok, 1 = erro, 130 = cancelado (contrato da CLI).
- */
-
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -29,35 +18,25 @@ import { runDownloadFlow } from './download.js';
 import { createContext } from './context.js';
 import { renderAnalysis, printAnalysisError } from './render.js';
 
-/** Detecta o subcomando: analyze | download | drm | help | interactive (padrão). */
 export function parseCliCommand(argv = []) {
   const first = argv[0];
   if (first === 'analyze' || first === 'download') {
     return { command: first, url: argv[1] || '', rest: argv.slice(2) };
   }
-  if (first === 'drm') {
-    const sub = argv[1] || '';
-    return { command: 'drm', url: argv[2] || '', rest: argv.slice(3), drmSub: sub };
-  }
-  // `help` literal abre a ajuda dos subcomandos; `--help`/`-h` continuam caindo
-  // no fluxo interativo (printUsage atual) para preservar compatibilidade.
   if (first === 'help') {
     return { command: 'help', url: '', rest: argv.slice(1) };
   }
   return { command: 'interactive', url: '', rest: argv };
 }
 
-/** Ajuda dos subcomandos (aditiva — o fluxo interativo mantém printUsage). */
 export function printSubcommandHelp(io) {
   io.log('');
-  io.log('StreamGrab - CLI nao-interativa (P9)');
+  io.log('StreamGrab - CLI nao-interativa');
   io.log('');
   io.log('Uso:');
   io.log('  streamgrab <url>                    Fluxo interativo (padrao)');
   io.log('  streamgrab analyze <url> [--json]   Analisa a URL sem interacao');
   io.log('  streamgrab download <url> [opcoes]  Baixa a URL sem interacao');
-  io.log('  streamgrab drm analyze <url>        Detecta DRM de uma URL');
-  io.log('  streamgrab drm download <url>       Pipeline DRM completo (licenca + decrypt)');
   io.log('');
   io.log('Opcoes do analyze:');
   io.log('  --json                       Saida em JSON (machine-readable)');
@@ -84,18 +63,8 @@ export function printSubcommandHelp(io) {
   io.log('  --referer <url>              Header Referer');
   io.log('  --user-agent <ua>            Header User-Agent');
   io.log('');
-  io.log('Comandos DRM (experimental, fase 1-2 do plano):');
-  io.log('  streamgrab drm analyze <url> [--json]');
-  io.log('  streamgrab drm download <url> [--output <dir>] [--license-url <url>] [--keys <k1:k1>]');
-  io.log('      --license-url <url>      License server (Widevine) — descoberto na Fase 0');
-  io.log('      --keys <kid:key,...>     Chaves KID:KEY já conhecidas (ex.: WidevineProxy2).');
-  io.log('                                Pula a licença — não precisa de CDM/device.');
-  io.log('      --raw-body               Envia o challenge como body bruto (octet-stream)');
-  io.log('      --no-download            Não baixa o stream (usa arquivo .encrypted.mp4 existente)');
-  io.log('');
 }
 
-/** Flags do analyze. */
 export function parseAnalyzeFlags(rest = []) {
   return {
     json: rest.includes('--json'),
@@ -104,17 +73,16 @@ export function parseAnalyzeFlags(rest = []) {
   };
 }
 
-/** Flags do download (valores escalares; flags booleanas). */
 export function parseDownloadFlags(rest = []) {
   const flags = {
     outputDir: '',
     filename: '',
     format: '',
     audioOnly: false,
-    audioLanguage: '',   // P12.1: --audio-lang <code>
-    allAudio: false,     // P12.1: --all-audio
-    subLanguages: [],    // P12.1: --subs <lang1,lang2>
-    embedSubs: false,    // P12.1: --embed-subs
+    audioLanguage: '',
+    allAudio: false,
+    subLanguages: [],
+    embedSubs: false,
     turbo: false,
     chunks: 0,
     noResume: false,
@@ -147,10 +115,6 @@ export function parseDownloadFlags(rest = []) {
   return flags;
 }
 
-/**
- * `streamgrab analyze <url>` — análise não-interativa.
- * Retorna { code, ok, info?, sourceType? }.
- */
 export async function runAnalyzeCommand({ url, projectRoot, io = console, flags = {} }) {
   const target = normalizeUrl(url);
   if (!target || !isValidHttpUrl(target)) {
@@ -194,12 +158,6 @@ export async function runAnalyzeCommand({ url, projectRoot, io = console, flags 
   return { code: 0, ok: true, info, sourceType };
 }
 
-/**
- * `streamgrab download <url>` — download não-interativo.
- * Delega ao runCliSession (mesmo fluxo do Electron) com respostas
- * pré-preenchidas; `--audio-only` usa um fluxo dedicado (extração de áudio).
- */
-
 export async function runDownloadCommand({ url, projectRoot, io = console, options = {} }) {
   const target = normalizeUrl(url);
   if (!target || !isValidHttpUrl(target)) {
@@ -218,7 +176,6 @@ export async function runDownloadCommand({ url, projectRoot, io = console, optio
     return runAudioOnlyFlow({ target, io, headers, auth, options });
   }
 
-  // --format <n|id>: resolve o índice da variante antes de montar as respostas.
   let qualityChoice = '';
   if (options.format) {
     const resolved = await resolveQualityChoice({ target, headers, auth, format: options.format, io });
@@ -226,13 +183,18 @@ export async function runDownloadCommand({ url, projectRoot, io = console, optio
     qualityChoice = resolved.qualityChoice;
   }
 
-  const answers = createNonInteractiveAnswers({ url: target, filename: options.filename, outputDir: options.outputDir, qualityChoice, forceCurl: options.forceCurl });
+  const answers = createNonInteractiveAnswers({
+    url: target,
+    filename: options.filename,
+    outputDir: options.outputDir,
+    qualityChoice,
+    forceCurl: options.forceCurl,
+  });
   const argv = buildDownloadArgv({ options, auth });
 
   return runCliSession({ argv, projectRoot, ask: answers.ask, io });
 }
 
-/** Respostas pré-preenchidas (mesmo contrato do answerBook do Electron). */
 export function createNonInteractiveAnswers({ url, filename = '', outputDir = '', qualityChoice = '', forceCurl = false }) {
   const baseName = filename ? sanitizeFilename(filename) : 'video';
   return {
@@ -248,7 +210,6 @@ export function createNonInteractiveAnswers({ url, filename = '', outputDir = ''
   };
 }
 
-/** Monta o argv repassado ao fluxo interativo (flags de download). */
 export function buildDownloadArgv({ options = {}, auth = {} }) {
   const argv = [];
   if (options.turbo) argv.push('--turbo');
@@ -260,12 +221,6 @@ export function buildDownloadArgv({ options = {}, auth = {} }) {
   return argv;
 }
 
-/**
- * Resolve `--format <n|id>` no índice 1-based das variantes:
- *   - formatId / uri `ytdlp-format:<id>` / itag / altura / bandwidth → análise
- *     prévia e match por id (mais específico);
- *   - número inteiro dentro do range → usado como índice 1-based.
- */
 export async function resolveQualityChoice({ target, headers, auth = {}, format = '', io = console }) {
   if (!format) return { qualityChoice: '', error: null };
 
@@ -280,8 +235,6 @@ export async function resolveQualityChoice({ target, headers, auth = {}, format 
   }
 
   const variants = info?.variants || [];
-
-  // 1) Match por id (formatId, ytdlp-format:<id>, itag, altura, bandwidth).
   const byId = variants.findIndex((v) => {
     if (v.formatId && String(v.formatId) === format) return true;
     if (v.uri === `${ADAPTIVE_URI_PREFIX}${format}`) return true;
@@ -292,7 +245,6 @@ export async function resolveQualityChoice({ target, headers, auth = {}, format 
   });
   if (byId !== -1) return { qualityChoice: String(byId + 1), error: null };
 
-  // 2) Índice 1-based (somente dentro do range de variantes).
   const numeric = Number(format);
   if (Number.isInteger(numeric) && numeric >= 1 && numeric <= variants.length) {
     return { qualityChoice: String(numeric), error: null };
@@ -302,7 +254,6 @@ export async function resolveQualityChoice({ target, headers, auth = {}, format 
   return { qualityChoice: '', error: 'formato-nao-encontrado' };
 }
 
-/** Fluxo dedicado do `--audio-only` (não-interativo, reusa runDownloadFlow). */
 async function runAudioOnlyFlow({ target, io = console, headers, auth, options }) {
   const core = createStreamGrabCore();
   const adapter = await resolveSourceAdapterAsync(target, headers);
@@ -349,8 +300,6 @@ async function runAudioOnlyFlow({ target, io = console, headers, auth, options }
     durationMs = (info.durationSeconds || 0) * 1000;
     io.log(`\nExtraindo audio (${ext}, ${audio.qualityLabel || 'melhor disponivel'})...`);
   } else {
-    // HLS / DASH / direto: o FFmpeg extrai o áudio com -vn (copy quando possível).
-    // outputArgs entram depois do -i (opções de saída).
     output = path.join(dir, ensureMp4(filename));
     outputArgs = ['-vn', '-c:a', 'copy'];
     io.log('\nExtraindo audio (FFmpeg -vn -c:a copy)...');
@@ -367,7 +316,6 @@ async function runAudioOnlyFlow({ target, io = console, headers, auth, options }
   return { code: 1, ok: false, error: result.error || 'falha' };
 }
 
-/** Valida se a string parece uma URL HTTP/HTTPS completa. */
 export function isValidHttpUrl(value) {
   try {
     const u = new URL(value);
@@ -377,167 +325,9 @@ export function isValidHttpUrl(value) {
   }
 }
 
-/** Garante a extensão desejada (diferente do ensureMp4, que força .mp4). */
 export function ensureExt(name, ext) {
   const safe = String(ext || '').replace(/^\./, '');
   if (!safe) return name;
   const re = new RegExp(`\\.${safe}$`, 'i');
   return re.test(name) ? name : `${name}.${safe}`;
-}
-
-// ---------------------------------------------------------------------------
-// Comandos DRM (fase 1-2 do plano de bypass — experimental)
-// ---------------------------------------------------------------------------
-
-/**
- * Parseia flags do `streamgrab drm ...`:
- *   --json | --output <dir> | --filename <nome> | --license-url <url>
- *   --raw-body | --keys <kid:key,...> | --no-download
- *   --cookies <file> | --cookies-from-browser <b> |
- *   --referer <url> | --user-agent <ua> | --license <url> (alias)
- */
-export function parseDrmFlags(rest = []) {
-  const flags = {
-    json: false,
-    outputDir: '',
-    filename: '',
-    licenseUrl: '',
-    rawBody: false,
-    keys: [],
-    download: true,
-    headers: {},
-  };
-  for (let i = 0; i < rest.length; i++) {
-    const arg = rest[i];
-    if (arg === '--json') flags.json = true;
-    else if (arg === '--output' || arg === '-o') flags.outputDir = rest[++i] || '';
-    else if (arg === '--filename') flags.filename = rest[++i] || '';
-    else if (arg === '--license-url' || arg === '--license') flags.licenseUrl = rest[++i] || '';
-    else if (arg === '--raw-body') flags.rawBody = true;
-    else if (arg === '--no-download') flags.download = false;
-    else if (arg === '--keys') flags.keys = parseKeysFlag(rest[++i] || '');
-    else if (arg === '--cookies') flags.cookiesFile = rest[++i] || '';
-    else if (arg === '--cookies-from-browser') flags.cookiesFromBrowser = rest[++i] || '';
-  }
-  flags.headers = parseCliHeaders(rest);
-  return flags;
-}
-
-/**
- * Converte "kid1:key1,kid2:key2" em [{ kid, key }].
- * Aceita também formato com traços no KID (remove traços).
- */
-export function parseKeysFlag(value) {
-  return String(value || '')
-    .split(',')
-    .map((pair) => pair.trim())
-    .filter(Boolean)
-    .map((pair) => {
-      const [kid = '', key = ''] = pair.split(':');
-      return { kid: String(kid).replace(/-/g, '').toLowerCase(), key: String(key).trim() };
-    })
-    .filter((k) => k.kid && k.key);
-}
-
-/**
- * `streamgrab drm analyze <url>` — detecta DRM (Widevine/PlayReady/ClearKey)
- * no manifesto da URL. Retorna { code, ok, drm? }.
- */
-export async function runDrmAnalyzeCommand({ url, io = console, flags = {} }) {
-  const target = normalizeUrl(url);
-  if (!isValidHttpUrl(target)) {
-    io.log('URL inválida. Use: streamgrab drm analyze <url>');
-    return { code: 1, ok: false, error: 'invalid-url' };
-  }
-
-  const { resolveDRMHandlerForUrl } = await import('../drm/registry.js');
-  const handler = resolveDRMHandlerForUrl(target, { verbose: true, onLog: (m) => io.log(m) });
-
-  try {
-    const result = await handler.detectDRMFromUrl(target, flags.headers || {});
-    const drm = result || { hasDRM: false, type: null, pssh: null, kid: null };
-    if (flags.json) {
-      io.log(JSON.stringify({ url: target, drm }, null, 2));
-    } else {
-      io.log('\nDetecção de DRM:');
-      io.log(`  URL: ${target}`);
-      io.log(`  DRM: ${drm.hasDRM ? drm.type || 'desconhecido' : 'nenhum'}`);
-      if (drm.hasDRM) {
-        if (drm.pssh) io.log(`  PSSH: ${drm.pssh}`);
-        if (drm.kid) io.log(`  KID: ${drm.kid}`);
-        if (drm.type === 'widevine') {
-          io.log('  Próximo passo: streamgrab drm download <url> --license-url <license_server>');
-        }
-      } else {
-        io.log('  Conteúdo sem proteção — download normal funciona.');
-      }
-    }
-    return { code: 0, ok: true, drm };
-  } catch (err) {
-    io.log(`Falha ao detectar DRM: ${err?.message || err}`);
-    return { code: 1, ok: false, error: err?.code || 'DRM_DETECT_FAILED' };
-  }
-}
-
-/**
- * `streamgrab drm download <url>` — pipeline DRM completo:
- * baixa o arquivo criptografado (FFmpeg) e descriptografa (mp4decrypt).
- *
- * Com `--keys <kid:key,...>` pula a aquisição de licença — ideal quando as
- * chaves foram capturadas com extensão de navegador (WidevineProxy2/wvg).
- */
-export async function runDrmDownloadCommand({ url, projectRoot: _projectRoot, io = console, flags = {} }) {
-  const target = normalizeUrl(url);
-  if (!isValidHttpUrl(target)) {
-    io.log('URL inválida. Use: streamgrab drm download <url>');
-    return { code: 1, ok: false, error: 'invalid-url' };
-  }
-
-  const { runDRMPipeline } = await import('../drm/registry.js');
-
-  const outDir = flags.outputDir || getDefaultDownloadsDir();
-  const filename = flags.filename || sanitizeFilename(new URL(target).hostname) || 'drm-output';
-  const outputFile = path.join(outDir, ensureMp4(filename));
-
-  io.log(`\n[drm] Pipeline Widevine — Mercado Play`);
-  io.log(`[drm] URL: ${target}`);
-  io.log(`[drm] Saída: ${outputFile}`);
-  if (flags.keys?.length) {
-    io.log(`[drm] ${flags.keys.length} chave(s) fornecida(s) manualmente`);
-  }
-
-  try {
-    const result = await runDRMPipeline({
-      url: target,
-      outputFile,
-      headers: flags.headers || {},
-      licenseUrl: flags.licenseUrl || '',
-      keys: flags.keys || [],
-      download: flags.download !== false,
-      service: 'mercadoplay',
-      onLog: (m) => io.log(m),
-    });
-
-    if (flags.json) {
-      io.log(JSON.stringify({ ok: true, ...result }, null, 2));
-    } else if (result.decrypted) {
-      io.log(`\n[drm] ✓ Descriptografado: ${result.output}`);
-      io.log(`[drm]   Chaves: ${result.keys?.length || 0} obtida(s)`);
-    } else {
-      io.log(`\n[drm] Sem DRM detectado — arquivo salvo em ${result.output}`);
-    }
-    return { code: 0, ok: true, ...result };
-  } catch (err) {
-    io.log(`\n[drm] ✗ Falha: ${err?.message || err}`);
-    if (err?.code === 'DRM_INFRA_ERROR') {
-      io.log('[drm] Instale a infraestrutura:');
-      io.log('  npm run mp4decrypt:install   (Bento4)');
-      io.log('  npm run cdm:extract          (Widevine CDM do Chrome/Edge)');
-      io.log('  pip install pywidevine       (licença)');
-      io.log('');
-      io.log('[drm] OU capture as chaves com uma extensão de navegador');
-      io.log('[drm] (WidevineProxy2 / wvg) e use: --keys <kid:key,kid:key>');
-    }
-    return { code: 1, ok: false, error: err?.code || 'DRM_DOWNLOAD_FAILED' };
-  }
 }
