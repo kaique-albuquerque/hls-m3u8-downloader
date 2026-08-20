@@ -46,6 +46,20 @@ import { resolveResumeSession } from '../core/session.js';
 import { createSmartTurbo, normalizeSmartTurbo, isRetryableChunkError } from '../core/smart-turbo.js';
 
 export const DEFAULT_RANGE_CHUNKS = 8;
+export const DEFAULT_RANGE_BLOCK_MULTIPLIER = 8;
+
+export function normalizeBlockCount(totalBytes, concurrency, blockCount) {
+  const safeConcurrency = Math.max(1, Math.floor(concurrency || DEFAULT_RANGE_CHUNKS));
+  const requested = Number(blockCount);
+  if (Number.isInteger(requested) && requested >= safeConcurrency) return requested;
+
+  const baseline = safeConcurrency * DEFAULT_RANGE_BLOCK_MULTIPLIER;
+  if (!Number.isFinite(totalBytes) || totalBytes <= 0) return baseline;
+
+  const minBlockSize = 8 * 1024 * 1024;
+  const maxBySize = Math.max(safeConcurrency, Math.ceil(totalBytes / minBlockSize));
+  return Math.max(safeConcurrency, Math.min(baseline, maxBySize));
+}
 
 /** Divide o arquivo em ranges contiguos cobrindo [0, total). */
 function computeRanges(total, count) {
@@ -85,6 +99,8 @@ export async function probeRangeSupport(url, { headers = {}, signal, timeoutMs =
  * @param {AbortSignal} [params.signal]
  * @param {Function} [params.onProgress]
  * @param {number} [params.chunkCount=8]
+ * @param {number} [params.blockCount] — numero total de blocos internos; quando
+ *   omitido, e derivado de `concurrency * 8` com piso por tamanho do arquivo.
  * @param {number} [params.concurrency] — limite de partes simultaneas (padrao: chunkCount).
  * @param {number} [params.timeoutMs] — 0 = sem timeout.
  * @param {boolean} [params.validateMedia=true]
@@ -109,6 +125,7 @@ export async function downloadParallelRanges({
   signal,
   onProgress,
   chunkCount = DEFAULT_RANGE_CHUNKS,
+  blockCount,
   concurrency,
   timeoutMs = 0,
   validateMedia = true,
@@ -119,7 +136,11 @@ export async function downloadParallelRanges({
   onExpiredUrl,
   onResume,
 } = {}) {
-  const count = Math.max(1, Math.floor(chunkCount));
+  const desiredConcurrency = Math.max(1, Math.floor(concurrency || chunkCount));
+  const desiredBlockCount =
+    Number.isInteger(blockCount) && blockCount > 0
+      ? blockCount
+      : Math.max(1, Math.floor(chunkCount || DEFAULT_RANGE_CHUNKS));
   const sp = statePath || defaultStatePath(output);
 
   // --- P6.1: decisao de resume (probe + estado + reanalise de URL expirada) ---
@@ -161,19 +182,19 @@ export async function downloadParallelRanges({
       if (!st || st.size !== probe.total) {
         await clearState(sp);
         state = null;
-        ranges = computeRanges(probe.total, count);
+        ranges = computeRanges(probe.total, desiredBlockCount);
         resumedBytes = 0;
         fileMode = 'w';
         onResume?.({ action: 'discard', reason: 'parcial ausente ou com tamanho divergente', resumedBytes: 0 });
       }
     } else {
       if (decision.state) await clearState(sp); // discard -> parcial descartado
-      ranges = computeRanges(probe.total, count);
+      ranges = computeRanges(probe.total, desiredBlockCount);
       onResume?.({ action: decision.action === 'discard' ? 'discard' : 'fresh', reason: decision.reason, resumedBytes: 0 });
     }
   } else {
     probe = await probeRangeSupport(url, { headers, signal, timeoutMs });
-    ranges = computeRanges(probe.total, count);
+    ranges = computeRanges(probe.total, desiredBlockCount);
   }
 
   const total = probe.total;
@@ -320,8 +341,7 @@ export async function downloadParallelRanges({
     // P6.2 — Smart Turbo: pool de workers DINAMICO (cresce/encolhe) quando
     // `smartTurbo` esta habilitado; `null`/`false` mantem o pool FIXO antigo
     // (rollback por config, sem mudanca de comportamento).
-    const hardLimit =
-      concurrency && concurrency > 0 ? Math.min(Math.floor(concurrency), ranges.length) : ranges.length;
+    const hardLimit = Math.min(desiredConcurrency, ranges.length);
     let turbo = null;
     if (smartTurbo && hardLimit >= 2) {
       const opts = normalizeSmartTurbo(smartTurbo);

@@ -11,6 +11,7 @@ import {
   runAnalyzeCommand,
   runDownloadCommand,
 } from './cli/commands.js';
+import { parseFileFlags, promptFileDownloadOptions, runFileDownloadCommand } from './cli/file-download.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -40,6 +41,38 @@ export async function main(argv = process.argv.slice(2)) {
     }
     const flags = parseDownloadFlags(rest);
     const result = await runDownloadCommand({ url, projectRoot: PROJECT_ROOT, io: console, options: flags });
+    return result?.code ?? 1;
+  }
+
+  if (command === 'file') {
+    if (rest.includes('--help') || rest.includes('-h') || url.startsWith('-')) {
+      printSubcommandHelp(console);
+      return 0;
+    }
+    const flags = parseFileFlags(rest);
+    let finalUrl = url;
+    let finalFlags = flags;
+    let filePrompter = null;
+    if (!finalUrl) {
+      filePrompter = createPrompter();
+      const prompted = await promptFileDownloadOptions((question) => filePrompter.ask(question), console, flags);
+      if (!prompted) {
+        try {
+          filePrompter.close();
+        } catch {
+          // ignore
+        }
+        return 1;
+      }
+      finalUrl = prompted.url;
+      finalFlags = { ...prompted.flags, ask: (question) => filePrompter.ask(question) };
+    }
+    const result = await runFileDownloadCommand({ url: finalUrl, io: console, flags: finalFlags });
+    try {
+      filePrompter?.close();
+    } catch {
+      // ignore
+    }
     return result?.code ?? 1;
   }
 

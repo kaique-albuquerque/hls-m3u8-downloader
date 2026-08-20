@@ -57,7 +57,7 @@ test('providers registry: get/list', () => {
   assert.equal(registry.get('hls').id, 'hls');
   assert.equal(registry.get('nao-existe'), null);
   const ids = registry.list().map((p) => p.id).sort();
-  assert.deepEqual(ids, ['dash', 'direct', 'hls', 'ytdlp']);
+  assert.deepEqual(ids, ['dash', 'direct', 'hls', 'mercadoplay', 'ytdlp']);
 });
 
 test('providers registry: detect nunca derruba com detector que lanca', () => {
