@@ -18,6 +18,7 @@ import {
   validateHistoryIdPayload,
   validateQueueEnqueuePayload,
   validateSettingsPayload,
+  validateExportLogsPayload,
 } from '../../electron/security.js';
 
 // ---------------------------------------------------------------------------
@@ -247,6 +248,18 @@ test('validateRevealPayload restringe abertura a raízes permitidas', () => {
   assert.equal(validateRevealPayload({ filePath: 'C:\\Users\\..\\etc' }, roots), null);
   assert.equal(validateRevealPayload({}, roots), null);
   assert.equal(validateRevealPayload({ filePath: 'relative.mp4' }, roots), null);
+});
+
+test('validateExportLogsPayload valida caminho e restringe a raizes permitidas', () => {
+  const roots = ['C:\\Users\\teste\\AppData\\Roaming\\StreamGrab', '/home/user/.config/StreamGrab'];
+  assert.deepEqual(validateExportLogsPayload({}, roots), { path: null });
+  assert.deepEqual(
+    validateExportLogsPayload({ path: 'C:\\Users\\teste\\AppData\\Roaming\\StreamGrab\\logs.txt' }, roots),
+    { path: 'C:\\Users\\teste\\AppData\\Roaming\\StreamGrab\\logs.txt' }
+  );
+  assert.equal(validateExportLogsPayload({ path: 'C:\\Windows\\System32\\malicious.txt' }, roots), null);
+  assert.equal(validateExportLogsPayload({ path: 'C:\\Users\\teste\\..\\evil.txt' }, roots), null);
+  assert.equal(validateExportLogsPayload({ path: 'relative-log.txt' }, roots), null);
 });
 
 // ---------------------------------------------------------------------------
