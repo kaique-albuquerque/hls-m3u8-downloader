@@ -37,6 +37,7 @@
     "drm:download": "node bin/streamgrab.mjs drm download",
     "drm:analyze": "node bin/streamgrab.mjs drm analyze",
     "drm:mercado-play": "node tools/download-mercado-play.mjs",
+    "drm:capture": "node tools/capture-wv-keys.mjs",
     "drm:mp": "node tools/drm-mercado-play.mjs",
     "drm:keys": "node tools/getwvkeys-license.mjs",
     "drm:setup": "node scripts/install-mp4decrypt.mjs && node scripts/install-curl-impersonate.mjs"

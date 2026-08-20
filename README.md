@@ -2,7 +2,7 @@
 
 # StreamGrab
 
-**Fast, universal video downloader for HLS, DASH, YouTube and other supported sources.**
+**Seu curso vai expirar? Baixa os vídeos e assiste pra sempre. 🎬**
 
 | 🇧🇷 [Português](#pt) | 🇺🇸 [English](#en) | 🇪🇸 [Español](#es) |
 |---|---|---|
@@ -13,10 +13,40 @@
 
 <h2 id="pt">🇧🇷 Português</h2>
 
-Aplicativo **CLI em Node.js** (com interface **Electron** opcional) para baixar vídeos de **HLS (.m3u8)**, **DASH (.mpd)**, **YouTube**, **redes sociais**, **arquivos diretos** e **outras fontes suportadas** (qualquer site coberto pelo motor yt-dlp) usando o **FFmpeg**, de forma simples e segura no Windows. Suporta Mídia Stream (mdstrm) via curl-impersonate, download paralelo (turbo) em URLs diretas e mux de vídeo+áudio para máxima qualidade.
+## A história
 
-> ⚠️ **Uso responsável**
-> Esta ferramenta trabalha **somente** com URLs que você mesmo fornece e para as quais você já tem **acesso legítimo e autorizado** pela plataforma. Ela **não** faz bypass de DRM (Widevine etc.), não burla autenticação, não captura cookies do navegador, não descobre credenciais e não tenta acessar nada além do que a URL fornecida já permite.
+Eu comprei um curso que gostei **demais**. O problema? O acesso ia expirar. Pra continuar assistindo, teria que comprar de novo — e no Brasil, isso é caro. País que mais paga imposto do mundo e a gente não tem retorno de nada do que paga.
+
+Aí pensei: *"não é possível que não exista uma forma de baixar esses vídeos"*. Mesmo que a plataforma não disponibilize, **deve existir um jeito**. E se não existisse, eu ia criar.
+
+Comecei a fuçar, descobri sobre `m3u8`, curl-impersonate, yt-dlp, e fui montando uma ferramenta. Hoje eu baixo os vídeos do curso, subo na minha nuvem pessoal e assisto **quando e onde quiser**, sem depender de ninguém.
+
+E o melhor: isso funciona pra muito mais coisa além de cursos — YouTube, Instagram, Facebook, TikTok, qualquer plataforma de streaming. Se o vídeo existe e você tem acesso, o StreamGrab resolve.
+
+## Como eu baixo os vídeos (passo a passo)
+
+1. Abro o vídeo no navegador e dou **play** pra garantir que tá carregando
+2. Aperto **F12** pra abrir o DevTools (ferramentas do desenvolvedor)
+3. Vou na aba **Network** e no filtro digito `m3u8` (ou `media` — varia conforme a plataforma)
+4. Clico no vídeo pra ele aparecer no DevTools
+5. Clico com o botão direito na requisição → **Copy → Copy request URL**
+6. Colo no StreamGrab e aperto Enter
+7. Escolho a qualidade e pronto — o vídeo baixa!
+
+> 💡 **Dica:** se o link der erro 403, provavelmente expirou. Volta no DevTools e copia de novo. Os tokens duram pouco.
+
+### E o YouTube / redes sociais?
+
+Pra YouTube, Instagram, Facebook, TikTok, e qualquer outra rede social, é **ainda mais simples**: copia o link normal do vídeo e cola no StreamGrab. Ele identifica a plataforma automaticamente pelo motor yt-dlp.
+
+```powershell
+npm run download:youtube   # cola o link do YouTube
+node src/index.js          # cola qualquer outro link (Instagram, Facebook, etc.)
+```
+
+### E na nuvem?
+
+Depois de baixar, é só subir o `.mp4` na sua nuvem pessoal (Google Drive, OneDrive, pCloud, o que preferir) e assistir de qualquer dispositivo. Livre pra sempre. 🎉
 
 ---
 
@@ -506,10 +536,40 @@ Use apenas para conteúdo que você tem o direito de baixar.
 
 <h2 id="en">🇺🇸 English</h2>
 
-A **Node.js CLI application** (with an optional **Electron** interface) to download videos from **HLS (.m3u8)**, **DASH (.mpd)**, **YouTube**, **social networks**, **direct files** and **other supported sources** (any site covered by the yt-dlp engine) using **FFmpeg** — simple and safe on Windows. Supports Mídia Stream (mdstrm) via curl-impersonate, parallel downloads (turbo) on direct URLs and video+audio muxing for maximum quality.
+## The story
 
-> ⚠️ **Responsible use**
-> This tool works **only** with URLs you provide yourself and to which you already have **legitimate, authorized access** from the platform. It does **not** bypass DRM (Widevine etc.), does not circumvent authentication, does not capture browser cookies, does not discover credentials, and does not attempt to access anything beyond what the provided URL already allows.
+I bought a course I really liked. The problem? My access was about to expire. To keep watching, I'd have to buy it again — and in Brazil, that's expensive. One of the highest-taxed countries in the world, with little to show for it.
+
+So I thought: *"there HAS to be a way to download these videos"*. Even if the platform doesn't offer it, there must be a way. And if there wasn't, I'd build one.
+
+I started digging, learned about `m3u8`, curl-impersonate, yt-dlp, and put together a tool. Today I download the course videos, upload them to my personal cloud, and watch **whenever and wherever I want**, no strings attached.
+
+And the best part: it works for way more than just courses — YouTube, Instagram, Facebook, TikTok, any streaming platform. If the video exists and you have access, StreamGrab handles it.
+
+## How I download videos (step by step)
+
+1. I open the video in the browser and hit **play** to make sure it's loading
+2. Press **F12** to open DevTools (browser developer tools)
+3. Go to the **Network** tab and type `m3u8` in the filter (or `media` — it varies by platform)
+4. Click the video so it shows up in DevTools
+5. Right-click the request → **Copy → Copy request URL**
+6. Paste it into StreamGrab and hit Enter
+7. Choose the quality and done — the video downloads!
+
+> 💡 **Tip:** if you get a 403 error, the token probably expired. Go back to DevTools and copy again. Tokens are short-lived.
+
+### What about YouTube / social media?
+
+For YouTube, Instagram, Facebook, TikTok, and any social platform, it's **even simpler**: just copy the regular video link and paste it into StreamGrab. It detects the platform automatically via the yt-dlp engine.
+
+```powershell
+npm run download:youtube   # paste a YouTube link
+node src/index.js          # paste any other link (Instagram, Facebook, etc.)
+```
+
+### And the cloud?
+
+After downloading, just upload the `.mp4` to your personal cloud (Google Drive, OneDrive, pCloud, whatever you prefer) and watch from any device. Free forever. 🎉
 
 ---
 
@@ -952,10 +1012,40 @@ Use only for content you have the right to download.
 
 <h2 id="es">🇪🇸 Español</h2>
 
-Una **aplicación CLI en Node.js** (con interfaz **Electron** opcional) para descargar videos de **HLS (.m3u8)**, **DASH (.mpd)**, **YouTube**, **redes sociales**, **archivos directos** y **otras fuentes compatibles** (cualquier sitio cubierto por el motor yt-dlp) usando **FFmpeg**, de forma sencilla y segura en Windows. Soporta Mídia Stream (mdstrm) vía curl-impersonate, descarga paralela (turbo) en URLs directas y mux de video+audio para máxima calidad.
+## La historia
 
-> ⚠️ **Uso responsable**
-> Esta herramienta funciona **solamente** con URLs que tú mismo proporcionas y a las que ya tienes **acceso legítimo y autorizado** por la plataforma. **No** hace bypass de DRM (Widevine, etc.), no evade la autenticación, no captura cookies del navegador, no descubre credenciales y no intenta acceder a nada más allá de lo que la URL proporcionada ya permite.
+Compré un curso que me encantó. El problema: mi acceso estaba por vencer. Para seguir viendo, tendría que comprarlo de nuevo — y en Brasil, eso es caro. Uno de los países que más impuestos paga del mundo, y a cambio no se ve nada.
+
+Entonces pensé: *"tiene que haber una forma de descargar estos videos"*. Aunque la plataforma no lo ofrezca, debe haber un camino. Y si no lo había, lo iba a construir.
+
+Empecé a investigar, descubrí `m3u8`, curl-impersonate, yt-dlp, y fui armando una herramienta. Hoy descargo los videos del curso, los subo a mi nube personal y los veo **cuando y donde quiera**, sin depender de nadie.
+
+Y lo mejor: funciona para mucho más que cursos — YouTube, Instagram, Facebook, TikTok, cualquier plataforma de streaming. Si el video existe y tienes acceso, StreamGrab lo resuelve.
+
+## Cómo descargo los videos (paso a paso)
+
+1. Abro el video en el navegador y le doy **play** para asegurarme de que carga
+2. Presiono **F12** para abrir DevTools (herramientas de desarrollador)
+3. Voy a la pestaña **Network** y en el filtro escribo `m3u8` (o `media` — varía según la plataforma)
+4. Hago clic en el video para que aparezca en DevTools
+5. Clic derecho en la petición → **Copy → Copy request URL**
+6. Lo pego en StreamGrab y presiono Enter
+7. Elijo la calidad y listo — ¡el video se descarga!
+
+> 💡 **Consejo:** si te da error 403, probablemente expiró el token. Vuelve a DevTools y copia de nuevo. Los tokens duran poco.
+
+### ¿Y YouTube / redes sociales?
+
+Para YouTube, Instagram, Facebook, TikTok y cualquier red social, es **aún más simple**: copia el enlace normal del video y pégalo en StreamGrab. Detecta la plataforma automáticamente con el motor yt-dlp.
+
+```powershell
+npm run download:youtube   # pega un enlace de YouTube
+node src/index.js          # pega cualquier otro enlace (Instagram, Facebook, etc.)
+```
+
+### ¿Y la nube?
+
+Después de descargar, solo sube el `.mp4` a tu nube personal (Google Drive, OneDrive, pCloud, lo que prefieras) y míralo desde cualquier dispositivo. Libre para siempre. 🎉
 
 ---
 

@@ -236,13 +236,23 @@ const licenseData = licOut.subarray(0, nl);
 
 if (httpCode !== 200 || !licenseData || licenseData.length < 50) {
   console.error(`[erro] Licença falhou: HTTP ${httpCode} (${licenseData.length} bytes)`);
-  const head = licenseData.subarray(0, 80).toString('utf8').replace(/\s+/g, ' ').trim();
-  if (/html|doctype/i.test(head)) {
-    console.error('  O DRMtoday retornou uma página HTML — possível bloqueio/erro no license server.');
-    console.error('  Dica: o DRMtoday exige o header x-dt-auth-token (JWT do player).');
-    console.error('  Rode: node tools/getwvkeys-license.mjs "<MPD>" --dt-auth-token "eyJhbGci..."');
+  // Mostra mais do corpo da resposta para debug
+  const bodyText = licenseData.toString('utf8').replace(/\s+/g, ' ').trim();
+  if (/html|doctype|<title/i.test(bodyText)) {
+    console.error('  DRMtoday retornou HTML:');
+    // Extrai o título ou mensagem de erro do HTML
+    const titleMatch = bodyText.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const msgMatch = bodyText.match(/<h1[^>]*>([^<]+)<\/h1>/i) || bodyText.match(/<p[^>]*>([^<]+)<\/p>/i);
+    if (titleMatch) console.error(`  Título: ${titleMatch[1]}`);
+    if (msgMatch) console.error(`  Mensagem: ${msgMatch[1]}`);
+    console.error('');
+    console.error('  Possíveis causas:');
+    console.error('  1. Cookie de sessão do Mercado Play ausente — capture os cookies no DevTools');
+    console.error('     (Network → qualquer request → Headers → Cookie) e passe com --cookie');
+    console.error('  2. O IP da máquina atual é diferente do IP que gerou o token');
+    console.error('  3. O token já não é válido para esta sessão DRMtoday');
   } else {
-    console.error('  Resposta:', head.slice(0, 200));
+    console.error('  Resposta:', bodyText.slice(0, 300));
   }
   process.exit(1);
 }
