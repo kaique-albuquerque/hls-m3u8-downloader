@@ -137,24 +137,6 @@ export const UnsupportedDrmError = defineErrorClass('UnsupportedDrmError', {
   defaultMessage: 'Conteudo protegido por DRM nao e suportado.',
   suggestedAction: 'Este conteudo e protegido por DRM (Widevine/PlayReady/FairPlay) e nao pode ser baixado pelo StreamGrab.',
 });
-export const DrmInfraError = defineErrorClass('DrmInfraError', {
-  code: 'DRM_INFRA_ERROR',
-  retryable: false,
-  defaultMessage: 'Infraestrutura DRM incompleta.',
-  suggestedAction: 'Rode "npm run mp4decrypt:install" e "npm run cdm:extract" e gere o device com pywidevine. Veja plan/drm-mercado-play.md (fase 1).',
-});
-export const DrmLicenseError = defineErrorClass('DrmLicenseError', {
-  code: 'DRM_LICENSE_ERROR',
-  retryable: true,
-  defaultMessage: 'Falha ao adquirir licenca DRM.',
-  suggestedAction: 'A licenca Widevine/PlayReady falhou. Verifique a URL do license server, os headers (Authorization/cookies) e o device CDM.',
-});
-export const DrmDecryptError = defineErrorClass('DrmDecryptError', {
-  code: 'DRM_DECRYPT_ERROR',
-  retryable: false,
-  defaultMessage: 'Falha ao descriptografar o conteudo.',
-  suggestedAction: 'O mp4decrypt nao conseguiu descriptografar. Verifique se as chaves KID:KEY estao corretas e se o arquivo esta realmente CENC.',
-});
 export const CancelledError = defineErrorClass('CancelledError', {
   code: 'CANCELLED',
   retryable: false,

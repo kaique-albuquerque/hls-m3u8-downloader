@@ -25,22 +25,13 @@
     "audit": "npm audit --omit=dev 2>&1 || echo '[audit] Vulnerabilities found — review above'",
     "format": "prettier --write .",
     "ffmpeg:install": "node scripts/install-ffmpeg.mjs",
-    "mp4decrypt:install": "node scripts/install-mp4decrypt.mjs",
-    "cdm:extract": "node scripts/install-widevine-cdm.mjs",
     "pack:resources": "node scripts/package-resources.mjs",
     "update:ytdlp": "node scripts/update-ytdlp.mjs",
     "dist": "npm run pack:resources && electron-builder --win",
     "dist:dir": "npm run pack:resources && electron-builder --win --dir",
     "dist:linux": "npm run pack:resources && electron-builder --linux",
     "release": "npm run dist && node scripts/checksums.mjs",
-    "postinstall": "node scripts/install-ffmpeg.mjs && node scripts/install-electron.mjs",
-    "drm:download": "node bin/streamgrab.mjs drm download",
-    "drm:analyze": "node bin/streamgrab.mjs drm analyze",
-    "drm:mercado-play": "node tools/download-mercado-play.mjs",
-    "drm:capture": "node tools/capture-wv-keys.mjs",
-    "drm:mp": "node tools/drm-mercado-play.mjs",
-    "drm:keys": "node tools/getwvkeys-license.mjs",
-    "drm:setup": "node scripts/install-mp4decrypt.mjs && node scripts/install-curl-impersonate.mjs"
+    "postinstall": "node scripts/install-ffmpeg.mjs && node scripts/install-electron.mjs"
   },
   "engines": {
     "node": ">=20"

@@ -55,8 +55,7 @@ if (isLocalFfmpegReady()) {
 const pathFfmpeg = resolveOnPath('ffmpeg');
 if (pathFfmpeg) {
   console.log(`[ffmpeg] FFmpeg já disponível no PATH: ${pathFfmpeg}`);
-  console.log('[ffmpeg] Instalação local não é necessária.');
-  process.exit(0);
+  console.log('[ffmpeg] O empacotamento do app ainda precisa de uma cópia local em vendor/ffmpeg.');
 }
 
 if (!FFmpeg_URLS.length) {
