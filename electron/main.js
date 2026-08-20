@@ -21,6 +21,7 @@ import {
   validateHistoryIdPayload,
   validateSettingsPayload,
   validateRevealPayload,
+  validateExportLogsPayload,
 } from './security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -149,10 +150,13 @@ ipcMain.handle('app:show-in-folder', async (_event, payload) => {
 
 // P4.1: export diagnostic log to file
 ipcMain.handle('app:export-logs', async (_event, payload) => {
+  const userDataDir = app.getPath('userData');
+  const validated = validateExportLogsPayload(payload, [...allowedRevealRoots, userDataDir]);
+  if (!validated) return { ok: false, error: 'Caminho de log inválido ou fora das pastas permitidas.' };
   const { exportLogs, defaultLogPath } = await import('../src/core/log-export.js');
   const logger = services?.core?.events ? services.core : null;
   const buffer = logger?.getBuffer?.() || [];
-  const dest = payload?.path || defaultLogPath(app.getPath('userData'));
+  const dest = validated.path || defaultLogPath(userDataDir);
   return exportLogs(buffer, dest);
 });
 

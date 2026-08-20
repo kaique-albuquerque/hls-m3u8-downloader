@@ -264,6 +264,17 @@ export function validateRevealPayload(payload = {}, allowedRoots = []) {
   return { filePath };
 }
 
+/** Valida o payload de `app:export-logs`. */
+export function validateExportLogsPayload(payload = {}, allowedRoots = []) {
+  const customPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
+  if (!customPath) return { path: null };
+  if (!isSafeAbsolutePath(customPath)) return null;
+  if (!allowedRoots.some((root) => typeof root === 'string' && root && isPathWithin(customPath, root))) {
+    return null;
+  }
+  return { path: customPath };
+}
+
 /** Verifica se `child` está dentro de `root` (ambos absolutos). */
 export function isPathWithin(child, root) {
   const norm = (p) => String(p).replace(/[\\/]+/g, '/').replace(/\/+$/, '');
