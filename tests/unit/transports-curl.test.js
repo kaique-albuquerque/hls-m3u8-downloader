@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import path from 'node:path';
+import fs from 'node:fs';
 
 import { extForUri, rewritePlaylist, CurlImpersonateTransport } from '../../src/transports/curl.js';
 
@@ -77,8 +78,16 @@ test('rewritePlaylist: URI desconhecida permanece intacta', () => {
 });
 
 test('CurlImpersonateTransport.resolve: null quando nao ha binario (sem dependencia externa)', () => {
-  // O binario curl-impersonate nao existe no ambiente de CI/testes, entao
-  // resolve() deve retornar null — o fluxo CLI responde 'curl-ausente'.
-  const t = CurlImpersonateTransport.resolve();
-  assert.equal(t, null);
+  const original = fs.readdirSync;
+  fs.readdirSync = () => {
+    const err = new Error('ENOENT');
+    err.code = 'ENOENT';
+    throw err;
+  };
+  try {
+    const t = CurlImpersonateTransport.resolve();
+    assert.equal(t, null);
+  } finally {
+    fs.readdirSync = original;
+  }
 });

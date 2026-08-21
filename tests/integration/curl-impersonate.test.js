@@ -39,6 +39,25 @@ function fakeDir(root) {
   return dir;
 }
 
+function withIsolatedCurlDirs(allowedDirs, fn) {
+  const original = fs.readdirSync;
+  const normalized = new Set(allowedDirs.map((dir) => path.resolve(dir)));
+  fs.readdirSync = function patched(dirPath, ...rest) {
+    const resolved = path.resolve(String(dirPath));
+    if (!normalized.has(resolved)) {
+      const err = new Error(`ENOENT: no such file or directory, scandir '${resolved}'`);
+      err.code = 'ENOENT';
+      throw err;
+    }
+    return original.call(this, dirPath, ...rest);
+  };
+  try {
+    return fn();
+  } finally {
+    fs.readdirSync = original;
+  }
+}
+
 test('curl-impersonate: v2.x com perfis - chrome146 e o preferido', () => {
   const dir = fakeDir(makeFakeRoot());
   const exe = path.join(dir, 'curl-impersonate.exe');
@@ -47,7 +66,7 @@ test('curl-impersonate: v2.x com perfis - chrome146 e o preferido', () => {
   fs.writeFileSync(path.join(dir, 'curl_firefox135.bat'), '');
   fs.writeFileSync(path.join(dir, 'curl_chrome101.bat'), '');
 
-  const found = findCurlImpersonate();
+  const found = withIsolatedCurlDirs([dir], () => findCurlImpersonate());
   assert.ok(found, 'deve encontrar o v2.x');
   assert.equal(found.name, 'curl-impersonate.exe');
   assert.equal(found.cmd, exe);
@@ -59,7 +78,7 @@ test('curl-impersonate: v2.x sem perfil conhecido - profile undefined', () => {
   fs.writeFileSync(path.join(dir, 'curl-impersonate.exe'), 'fake');
   fs.writeFileSync(path.join(dir, 'curl_unknown99.bat'), '');
 
-  const found = findCurlImpersonate();
+  const found = withIsolatedCurlDirs([dir], () => findCurlImpersonate());
   assert.ok(found);
   assert.equal(found.name, 'curl-impersonate.exe');
   assert.equal(found.profile, undefined, 'perfil desconhecido nao entra no PROFILE_ORDER');
@@ -71,14 +90,15 @@ test('curl-impersonate: v1.x standalone ordenado por versao do Chrome (desc)', (
   fs.writeFileSync(path.join(dir, 'curl_chrome999.exe'), 'fake');
   fs.writeFileSync(path.join(dir, 'curl_edge101.exe'), 'fake');
 
-  const found = findCurlImpersonate();
+  const found = withIsolatedCurlDirs([dir], () => findCurlImpersonate());
   assert.ok(found);
   assert.equal(found.name, 'curl_chrome999.exe', 'deve escolher a versao mais recente');
   assert.equal(found.profile, undefined);
 });
 
 test('curl-impersonate: sem binarios em lugar nenhum -> null', () => {
-  makeFakeRoot(); // diretorio vazio
-  const found = findCurlImpersonate();
+  const root = makeFakeRoot();
+  const emptyDir = path.join(root, 'curl-impersonate');
+  const found = withIsolatedCurlDirs([emptyDir], () => findCurlImpersonate());
   assert.equal(found, null);
 });

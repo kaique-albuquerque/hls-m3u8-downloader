@@ -40,6 +40,16 @@ export function formatHeaders(headers) {
   return entries.map(([k, v]) => `${k}: ${String(v).trim()}\r\n`).join('');
 }
 
+function isLikelyLocalInput(value) {
+  const input = String(value || '').trim();
+  if (!input) return false;
+  if (/^https?:\/\//i.test(input)) return false;
+  if (/^[a-z]:[\\/]/i.test(input)) return true;
+  if (input.startsWith('\\\\')) return true;
+  if (input.startsWith('./') || input.startsWith('../') || input.startsWith('/') || input.startsWith('.\\')) return true;
+  return false;
+}
+
 /**
  * Monta os args de um download/remux via FFmpeg. Puro (sem I/O) — testável.
  * `extraArgs` (ex.: ['-allowed_extensions', 'ALL']) entram antes do -i,
@@ -48,7 +58,7 @@ export function formatHeaders(headers) {
  */
 export function buildDownloadArgs({ url, output, headers = {}, modeIndex = 0, extraArgs = [], outputArgs = [] }) {
   const mode = MODES[modeIndex] || MODES[0];
-  const isRemoteInput = /^https?:\/\//i.test(String(url || ''));
+  const isRemoteInput = !isLikelyLocalInput(url);
   const effectiveHeaders = normalizeHeaders(headers);
   if (isRemoteInput && !effectiveHeaders['User-Agent']) effectiveHeaders['User-Agent'] = DEFAULT_USER_AGENT;
   const headerStr = formatHeaders(effectiveHeaders);

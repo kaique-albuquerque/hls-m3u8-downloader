@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { DEFAULT_USER_AGENT } from './core/url-utils.js';
+import { normalizeHeaders } from './core/header-utils.js';
 
 // Re-exports from focused modules (Sprint 2.3) — backward compatible.
 export { DEFAULT_USER_AGENT, normalizeUrl, isValidM3u8Url, maskUrl } from './core/url-utils.js';
