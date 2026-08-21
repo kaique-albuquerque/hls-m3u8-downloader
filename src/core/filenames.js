@@ -65,7 +65,7 @@ export function isPathTraversalSafe(value) {
 
 /** Mantem apenas o basename (bloqueia traversal por diretorio). */
 export function baseNameOnly(value) {
-  const s = String(value ?? '').replace(/\0/g, '');
+  const s = String(value ?? '').replace(/\0/g, '').replace(/\\/g, '/');
   return path.basename(s).trim();
 }
 
