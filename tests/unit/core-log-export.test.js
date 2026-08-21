@@ -41,7 +41,8 @@ test('log-export: exportLogs creates directory if missing', () => {
 });
 
 test('log-export: exportLogs returns error on invalid path', () => {
-  const result = exportLogs([], 'Z:\\nonexistent\\dir\\log.txt');
+  const invalidPath = process.platform === 'win32' ? 'Z:\\nonexistent\\dir\\log.txt' : '/nonexistent_root_dir_98765/log.txt';
+  const result = exportLogs([], invalidPath);
   assert.equal(result.ok, false);
   assert.ok(result.error);
 });
