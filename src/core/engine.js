@@ -893,8 +893,13 @@ export class DownloadEngine {
   _extensionFor(prepared) {
     if (prepared.strategy === 'mux') return '.mp4';
     const url = String(prepared.downloadUrl || prepared.url || '');
-    const m = /\.(mp4|webm|mkv|mov|m4a|mp3)(\?|$)/i.exec(url);
-    return m ? `.${m[1].toLowerCase()}` : '.mp4';
+    try {
+      const pathname = new URL(url).pathname || '';
+      const m = pathname.match(/\.([A-Za-z0-9]{1,12})$/);
+      return m ? `.${m[1].toLowerCase()}` : '.mp4';
+    } catch {
+      return '.mp4';
+    }
   }
 
   _makeProgress(job) {

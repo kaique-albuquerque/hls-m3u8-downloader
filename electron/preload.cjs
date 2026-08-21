@@ -27,7 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   // P11 — Fila real (src/core/queue.js).
   queueEnqueue: (payload) => ipcRenderer.invoke('queue:enqueue', payload),
   queueList: () => ipcRenderer.invoke('queue:list'),
-    queueSetPaused: (paused) => ipcRenderer.invoke('queue:setPaused', Boolean(paused)),
+  queueSetPaused: (paused) => ipcRenderer.invoke('queue:setPaused', Boolean(paused)),
+  queuePause: (jobId) => ipcRenderer.invoke('queue:pause', { jobId }),
+  queueResume: (jobId) => ipcRenderer.invoke('queue:resume', { jobId }),
   queueCancel: (jobId) => ipcRenderer.invoke('queue:cancel', { jobId }),
   queueRetry: (jobId) => ipcRenderer.invoke('queue:retry', { jobId }),
   queueRemove: (jobId) => ipcRenderer.invoke('queue:remove', { jobId }),
