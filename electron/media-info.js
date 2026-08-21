@@ -24,6 +24,16 @@ const PROTOCOLS = {
   unknown: 'desconhecido',
 };
 
+function detectContainerFromUrl(value) {
+  try {
+    const pathname = new URL(String(value || '')).pathname || '';
+    const match = pathname.match(/\.([A-Za-z0-9]{1,12})$/);
+    return match ? match[1].toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Formata duração (segundos) em "H:MM:SS" ou "MM:SS". */
 export function formatDuration(seconds) {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
@@ -119,13 +129,14 @@ export function normalizeMediaInfo(raw = {}, { url = '', baseUrl = '', sourceTyp
       normalizeRepresentationToFormat
     );
   } else if (kind === 'direct' || kind === 'media' || kind === 'unknown') {
+    const directContainer = detectContainerFromUrl(url) || 'bin';
     formats = [
       {
         id: 'direct',
         resolution: 'Direto',
         videoCodec: '',
         audioCodec: '',
-        container: 'mp4',
+        container: directContainer,
         bitrate: 0,
         bitrateLabel: '',
         estimatedSize: 0,

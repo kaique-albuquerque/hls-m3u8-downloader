@@ -20,7 +20,7 @@ import { renderAnalysis, printAnalysisError } from './render.js';
 
 export function parseCliCommand(argv = []) {
   const first = argv[0];
-  if (first === 'analyze' || first === 'download' || first === 'file') {
+  if (first === 'analyze' || first === 'download') {
     return { command: first, url: argv[1] || '', rest: argv.slice(2) };
   }
   if (first === 'help') {
@@ -37,7 +37,6 @@ export function printSubcommandHelp(io) {
   io.log('  streamgrab <url>                    Fluxo interativo (padrao)');
   io.log('  streamgrab analyze <url> [--json]   Analisa a URL sem interacao');
   io.log('  streamgrab download <url> [opcoes]  Baixa a URL sem interacao');
-  io.log('  streamgrab file <url> [opcoes]      Baixa arquivo generico HTTP/HTTPS');
   io.log('');
   io.log('Opcoes do analyze:');
   io.log('  --json                       Saida em JSON (machine-readable)');
@@ -64,16 +63,6 @@ export function printSubcommandHelp(io) {
   io.log('  --curl-impersonate           Forca o modo curl-impersonate para HLS');
   io.log('  --referer <url>              Header Referer');
   io.log('  --user-agent <ua>            Header User-Agent');
-  io.log('');
-  io.log('Opcoes do file:');
-  io.log('  --output <dir>               Pasta de saida (padrao: Downloads)');
-  io.log('  --filename <nome.ext>        Nome final do arquivo');
-  io.log('  --turbo                      Download paralelo por partes (Range)');
-  io.log('  --concurrency <n>            Conexoes do turbo (padrao: 8)');
-  io.log('  --chunks <n>                 Alias antigo de --concurrency');
-  io.log('  --block-count <n>            Quantidade total de partes temporarias');
-  io.log('  --no-resume                  Desliga resume do turbo');
-  io.log('');
 }
 
 export function parseAnalyzeFlags(rest = []) {
