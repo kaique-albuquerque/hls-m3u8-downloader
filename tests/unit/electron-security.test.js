@@ -8,6 +8,7 @@ import {
   sanitizeDownloadFilename,
   isAbsolutePath,
   isSafeAbsolutePath,
+  isSafeCookiesFromBrowser,
   validateAnalyzePayload,
   validateDownloadPayload,
   validateCancelPayload,
@@ -122,6 +123,17 @@ test('isSafeAbsolutePath rejeita segmentos ..', () => {
   assert.equal(isSafeAbsolutePath('relative'), false);
 });
 
+test('isSafeCookiesFromBrowser valida strings de navegador permitidas', () => {
+  assert.equal(isSafeCookiesFromBrowser('chrome'), true);
+  assert.equal(isSafeCookiesFromBrowser('firefox:Default'), true);
+  assert.equal(isSafeCookiesFromBrowser('chrome:Profile 1+keyring'), true);
+  assert.equal(isSafeCookiesFromBrowser(''), true);
+  assert.equal(isSafeCookiesFromBrowser('chrome; rm -rf /'), false);
+  assert.equal(isSafeCookiesFromBrowser('chrome"'), false);
+  assert.equal(isSafeCookiesFromBrowser('a'.repeat(101)), false);
+  assert.equal(isSafeCookiesFromBrowser(123), false);
+});
+
 test('isPathWithin verifica subcaminhos', () => {
   assert.equal(isPathWithin('C:\\Users\\a\\Downloads\\v.mp4', 'C:\\Users\\a\\Downloads'), true);
   assert.equal(isPathWithin('C:\\Users\\a\\Downloads', 'C:\\Users\\a\\Downloads'), true);
@@ -153,6 +165,23 @@ test('validateAnalyzePayload rejeita URL inválida e normaliza campos ausentes',
   const out = validateAnalyzePayload({ url: 'https://example.com' });
   assert.deepEqual(out.headers, {});
   assert.deepEqual(out.auth, { cookiesFile: '', cookiesFromBrowser: '' });
+});
+
+test('validateAnalyzePayload valida cookiesFile e cookiesFromBrowser', () => {
+  assert.equal(
+    validateAnalyzePayload({
+      url: 'https://example.com',
+      auth: { cookiesFile: '../relative/cookies.txt' },
+    }),
+    null
+  );
+  assert.equal(
+    validateAnalyzePayload({
+      url: 'https://example.com',
+      auth: { cookiesFromBrowser: 'chrome; inject' },
+    }),
+    null
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -205,6 +234,24 @@ test('validateDownloadPayload rejeita payload inválido', () => {
       url: 'https://example.com',
       filename: 'video',
       qualityChoice: 'abc',
+    }),
+    null
+  );
+  assert.equal(
+    validateDownloadPayload({
+      taskId: 'tab-1',
+      url: 'https://example.com',
+      filename: 'video',
+      cookiesFile: '../relative/cookies.txt',
+    }),
+    null
+  );
+  assert.equal(
+    validateDownloadPayload({
+      taskId: 'tab-1',
+      url: 'https://example.com',
+      filename: 'video',
+      cookiesFromBrowser: 'firefox"bad',
     }),
     null
   );
@@ -347,6 +394,14 @@ test('validateQueueEnqueuePayload normaliza campos opcionais e valida segurança
   assert.equal(traversal.filename, '');
   assert.equal(
     validateQueueEnqueuePayload({ url: 'https://example.com', qualityChoice: 'abc' }),
+    null
+  );
+  assert.equal(
+    validateQueueEnqueuePayload({ url: 'https://example.com', cookiesFile: '../../etc/passwd' }),
+    null
+  );
+  assert.equal(
+    validateQueueEnqueuePayload({ url: 'https://example.com', cookiesFromBrowser: 'opera; bad' }),
     null
   );
 });

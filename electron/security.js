@@ -22,6 +22,7 @@ const TASK_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const FILENAME_BAD_RE = /[\\/]|\.\./;
 const ABSOLUTE_WIN_RE = /^[A-Za-z]:[\\/]/;
 const ABSOLUTE_POSIX_RE = /^\//;
+const COOKIES_BROWSER_RE = /^[A-Za-z0-9_:.+/\s-]{1,100}$/;
 
 /** Valida uma URL não confiável vinda do renderer (apenas http/https). */
 export function isSafeHttpUrl(value) {
@@ -76,6 +77,14 @@ export function isSafeAbsolutePath(value) {
   return !segments.includes('..');
 }
 
+/** Valida o valor de cookiesFromBrowser (navegador/perfil para yt-dlp). */
+export function isSafeCookiesFromBrowser(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return COOKIES_BROWSER_RE.test(trimmed);
+}
+
 /** Valida o payload de `playlist:analyze`. Retorna o payload limpo ou null. */
 export function validateAnalyzePayload(payload = {}) {
   const url = typeof payload?.url === 'string' ? payload.url.trim() : '';
@@ -84,9 +93,13 @@ export function validateAnalyzePayload(payload = {}) {
     ? payload.headers
     : {};
   const rawAuth = payload?.auth && typeof payload.auth === 'object' && !Array.isArray(payload.auth) ? payload.auth : {};
+  const cookiesFile = typeof rawAuth.cookiesFile === 'string' ? rawAuth.cookiesFile.trim() : '';
+  if (cookiesFile && !isSafeAbsolutePath(cookiesFile)) return null;
+  const cookiesFromBrowser = typeof rawAuth.cookiesFromBrowser === 'string' ? rawAuth.cookiesFromBrowser.trim() : '';
+  if (cookiesFromBrowser && !isSafeCookiesFromBrowser(cookiesFromBrowser)) return null;
   const auth = {
-    cookiesFile: typeof rawAuth.cookiesFile === 'string' ? rawAuth.cookiesFile : '',
-    cookiesFromBrowser: typeof rawAuth.cookiesFromBrowser === 'string' ? rawAuth.cookiesFromBrowser : '',
+    cookiesFile,
+    cookiesFromBrowser,
   };
   return { url, headers, auth };
 }
@@ -119,8 +132,10 @@ export function validateDownloadPayload(payload = {}) {
   const forceCurl = payload?.forceCurl === true;
   const turbo = payload?.turbo === true;
 
-  const cookiesFile = typeof payload?.cookiesFile === 'string' ? payload.cookiesFile : '';
-  const cookiesFromBrowser = typeof payload?.cookiesFromBrowser === 'string' ? payload.cookiesFromBrowser : '';
+  const cookiesFile = typeof payload?.cookiesFile === 'string' ? payload.cookiesFile.trim() : '';
+  if (cookiesFile && !isSafeAbsolutePath(cookiesFile)) return null;
+  const cookiesFromBrowser = typeof payload?.cookiesFromBrowser === 'string' ? payload.cookiesFromBrowser.trim() : '';
+  if (cookiesFromBrowser && !isSafeCookiesFromBrowser(cookiesFromBrowser)) return null;
 
   return {
     taskId: String(payload.taskId),
@@ -188,8 +203,10 @@ export function validateQueueEnqueuePayload(payload = {}) {
   const qualityChoice = typeof payload?.qualityChoice === 'string' ? payload.qualityChoice : '';
   if (qualityChoice && !/^\d+$/.test(qualityChoice)) return null;
 
-  const cookiesFile = typeof payload?.cookiesFile === 'string' ? payload.cookiesFile : '';
-  const cookiesFromBrowser = typeof payload?.cookiesFromBrowser === 'string' ? payload.cookiesFromBrowser : '';
+  const cookiesFile = typeof payload?.cookiesFile === 'string' ? payload.cookiesFile.trim() : '';
+  if (cookiesFile && !isSafeAbsolutePath(cookiesFile)) return null;
+  const cookiesFromBrowser = typeof payload?.cookiesFromBrowser === 'string' ? payload.cookiesFromBrowser.trim() : '';
+  if (cookiesFromBrowser && !isSafeCookiesFromBrowser(cookiesFromBrowser)) return null;
 
   // P12.1: audio/subtitle selections
   const audioLanguage = typeof payload?.audioLanguage === 'string' ? payload.audioLanguage.trim() : '';
